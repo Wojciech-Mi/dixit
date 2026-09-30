@@ -200,8 +200,13 @@
   <!-- GÓRNY PASEK NAWIGACJI (Zawsze widoczny) -->
   <header class="sticky top-0 z-30 backdrop-blur-md bg-slate-950/80 border-b border-slate-800/80 px-3 py-2.5">
     <div class="max-w-3xl mx-auto flex items-center justify-between gap-2">
-      <!-- Logo i kod pokoju -->
-      <div class="flex items-center gap-2">
+      <!-- Logo i kod pokoju (Klikalne podczas pobytu w pokoju) -->
+      <div
+        id="headerLogoBlock"
+        onclick="handleLogoClick()"
+        class="flex items-center gap-2 rounded-xl transition"
+        title="Dixit Companion"
+      >
         <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20 text-slate-950 font-black text-lg">
           ✦
         </div>
@@ -422,7 +427,7 @@
             <span class="block text-[10px] font-normal text-slate-400">Dla 7-10 osób</span>
           </button>
           <button onclick="updateGameSettings('ENDLESS', 0)" id="modeBtnEndless" class="py-3 px-3 rounded-2xl border border-slate-700 bg-slate-950/60 text-slate-300 font-bold text-sm transition">
-            ♾️️ Endless
+            ♾ Endless
             <span class="block text-[10px] font-normal text-slate-400">Do decyzji Hosta</span>
           </button>
         </div>
@@ -957,6 +962,16 @@
           <!-- Wypełniane dynamicznie -->
         </div>
       </div>
+
+      <!-- Zakończenie rozgrywki dla wszystkich -->
+      <div class="pt-3 border-t border-slate-800">
+        <button
+          onclick="requestHostEndGameForAll()"
+          class="w-full py-3.5 px-4 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm shadow-lg shadow-rose-600/25 transition active:scale-98 flex items-center justify-center gap-2"
+        >
+          <span>🛑 Zakończ rozgrywkę dla wszystkich</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -1008,6 +1023,41 @@
           <div>3. Uruchom serwer: <span class="text-emerald-400">node server.js</span></div>
           <div>4. (Opcjonalnie HTTPS dla kamery i gry poza Wi-Fi): <span class="text-sky-400">npx cloudflared tunnel --url http://localhost:3000</span></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL 4: WŁASNY MODAL POTWIERDZENIA AKCJI                -->
+  <!-- ======================================================== -->
+  <div id="modalConfirm" class="fixed inset-0 z-[60] hidden bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="a11y-panel w-full max-w-sm rounded-3xl bg-slate-900 border border-slate-700 p-5 sm:p-6 shadow-2xl space-y-5 text-center animate-float-up">
+      <div class="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto">
+        <i data-lucide="alert-circle" class="w-6 h-6"></i>
+      </div>
+      <div class="space-y-1.5">
+        <h3 id="modalConfirmTitle" class="text-lg sm:text-xl font-extrabold text-white">
+          Czy na pewno chcesz opuścić stół?
+        </h3>
+        <p id="modalConfirmSubtitle" class="text-xs sm:text-sm text-slate-400 leading-relaxed">
+          Powrócisz do ekranu startowego aplikacji.
+        </p>
+      </div>
+      <div class="grid grid-cols-2 gap-3 pt-1">
+        <button
+          type="button"
+          onclick="closeConfirmationModal()"
+          class="py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-sm border border-slate-700 transition active:scale-95"
+        >
+          Anuluj
+        </button>
+        <button
+          id="modalConfirmActionBtn"
+          type="button"
+          class="py-3 px-4 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm shadow-lg shadow-rose-600/25 transition active:scale-95"
+        >
+          Potwierdź
+        </button>
       </div>
     </div>
   </div>
@@ -1134,6 +1184,7 @@
     let revealTimeouts = [];
     let autoNextRoundInterval = null;
     let autoNextRoundSecondsLeft = 15;
+    let pendingConfirmCallback = null;
 
     window.addEventListener('DOMContentLoaded', () => {
       lucide.createIcons();
@@ -1182,6 +1233,118 @@
         toast.style.transition = 'opacity 0.3s ease';
         setTimeout(() => toast.remove(), 300);
       }, 3400);
+    }
+
+    // Obsługa własnego modala potwierdzenia
+    function openConfirmationModal(titleText, subtitleText, confirmButtonLabel, onConfirm) {
+      document.getElementById('modalConfirmTitle').textContent = titleText;
+      document.getElementById('modalConfirmSubtitle').textContent = subtitleText || '';
+      const actionBtn = document.getElementById('modalConfirmActionBtn');
+      actionBtn.textContent = confirmButtonLabel || 'Potwierdź';
+      pendingConfirmCallback = onConfirm;
+      actionBtn.onclick = () => {
+        const cb = pendingConfirmCallback;
+        closeConfirmationModal();
+        if (typeof cb === 'function') cb();
+      };
+      document.getElementById('modalConfirm').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeConfirmationModal() {
+      document.getElementById('modalConfirm').classList.add('hidden');
+      pendingConfirmCallback = null;
+    }
+
+    // 1. Kliknięcie w logo DIXIT w lewym górnym rogu -> Opuszczanie stołu
+    function handleLogoClick() {
+      const inRoom = Boolean(gameState.roomCode && gameState.players.length > 0);
+      if (!inRoom) return;
+
+      openConfirmationModal(
+        'Czy na pewno chcesz opuścić stół?',
+        'Twoje połączenie z obecnym pokojem zostanie zamknięte i wrócisz do ekranu głównego.',
+        'Opuść stół',
+        () => {
+          confirmLeaveRoom();
+        }
+      );
+    }
+
+    function confirmLeaveRoom() {
+      // a) Wyślij akcję do Hosta
+      sendActionToHost({ type: 'PLAYER_LEAVE', playerId: myDeviceId });
+
+      // c) Wyczyść zapisany stan pokoju z localStorage
+      localStorage.removeItem(STORAGE_KEYS.HOST_SAVED_STATE);
+      localStorage.removeItem(STORAGE_KEYS.ROOM_CODE);
+
+      // Zamknij połączenie PeerJS (z krótkim opóźnieniem na wysłanie pakietu WebRTC do Hosta)
+      const connToClose = hostConnection;
+      const peerToDestroy = peer;
+      hostConnection = null;
+      peer = null;
+      peerConnections = {};
+
+      setTimeout(() => {
+        try {
+          if (connToClose && connToClose.open) connToClose.close();
+        } catch (e) {}
+        try {
+          if (peerToDestroy) peerToDestroy.destroy();
+        } catch (e) {}
+      }, 120);
+
+      // Wyczyść parametr ?room= z adresu URL (zabezpieczone przed SecurityError w środowisku blob:/iframe)
+      try {
+        if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } catch (e) {
+        // Ignoruj błąd bezpieczeństwa historii w sandboxie/blob URL
+      }
+
+      // Zatrzymaj timery i zresetuj lokalny stan gry
+      clearAutoNextRoundTimer();
+      revealTimeouts.forEach((t) => clearTimeout(t));
+      revealTimeouts = [];
+      lastAnimatedRoundKey = '';
+      lastRenderedQrUrl = '';
+      activePovPlayerId = myDeviceId;
+
+      gameState.roomCode = '';
+      gameState.hostId = '';
+      gameState.status = 'LOBBY';
+      gameState.players = [];
+      gameState.votes = {};
+      gameState.claims = {};
+      gameState.lastRoundReveal = null;
+
+      document.getElementById('inputRoomCode').value = '';
+      document.getElementById('headerRoomBadge').textContent = 'Tryb lokalny / P2P';
+
+      closeHostModal();
+      renderAllViews();
+      showToast('Opuściłeś stół.', 'info');
+    }
+
+    // 2. Zakończenie rozgrywki dla wszystkich przez Hosta
+    function requestHostEndGameForAll() {
+      if (!isMeHost()) return;
+      openConfirmationModal(
+        'Czy na pewno chcesz zakończyć rozgrywkę dla wszystkich graczy?',
+        'Wszyscy gracze przy stole przejdą do ekranu podium i podsumowania punktów.',
+        'Zakończ grę',
+        () => {
+          clearAutoNextRoundTimer();
+          revealTimeouts.forEach((t) => clearTimeout(t));
+          revealTimeouts = [];
+          gameState.status = 'GAME_OVER';
+          closeHostModal();
+          broadcastStateFromHost();
+          showToast('Rozgrywka została zakończona przez Hosta.', 'info');
+        }
+      );
     }
 
     function initLocalBroadcastChannel() {
@@ -1452,6 +1615,7 @@
               const oldId = sameName.id;
               sameName.id = p.id;
               sameName.color = getFirstFreeColor(sameName.color, p.id);
+              sameName.active = true;
               if (gameState.votes[oldId] !== undefined) {
                 gameState.votes[p.id] = gameState.votes[oldId];
                 delete gameState.votes[oldId];
@@ -1472,6 +1636,85 @@
               });
             }
           }
+          broadcastStateFromHost();
+          break;
+        }
+
+        case 'PLAYER_LEAVE': {
+          const { playerId } = action;
+          if (!playerId) return;
+
+          if (gameState.status === 'LOBBY') {
+            if (playerId !== gameState.hostId) {
+              gameState.players = gameState.players.filter((p) => p.id !== playerId);
+              broadcastStateFromHost();
+            }
+            return;
+          }
+
+          const leavingPlayer = gameState.players.find((p) => p.id === playerId);
+          if (!leavingPlayer) return;
+
+          const prevStoryteller = getCurrentStoryteller();
+          const wasStoryteller = Boolean(prevStoryteller && prevStoryteller.id === playerId);
+
+          leavingPlayer.active = false;
+
+          const remainingActive = getActivePlayers();
+          if (remainingActive.length > 0) {
+            if (wasStoryteller) {
+              // Rola Bajarza przechodzi na kolejnego aktywnego gracza w kolejności
+              gameState.storytellerIndex = gameState.storytellerIndex % remainingActive.length;
+              if (gameState.status === 'STORYTELLER_PREP') {
+                gameState.votes = {};
+                gameState.claims = {};
+                const nextSt = getCurrentStoryteller();
+                if (nextSt && nextSt.isBot) {
+                  setTimeout(() => {
+                    if (gameState.status === 'STORYTELLER_PREP') {
+                      processIncomingActionOnHost({ type: 'STORYTELLER_CARDS_READY' });
+                    }
+                  }, 900);
+                }
+              }
+            } else if (prevStoryteller) {
+              // Zachowaj obecnego Bajarza, gdy inny gracz staje się nieaktywny
+              const preservedIdx = remainingActive.findIndex((p) => p.id === prevStoryteller.id);
+              if (preservedIdx !== -1) {
+                gameState.storytellerIndex = preservedIdx;
+              }
+            }
+          }
+
+          // Sprawdź, czy w fazie VOTING pozostali aktywni gracze mają już komplet głosów
+          if (gameState.status === 'VOTING') {
+            const currentSt = getCurrentStoryteller();
+            const eligibleVoters = remainingActive.filter(
+              (pl) => !currentSt || pl.id !== currentSt.id
+            );
+            const allVoted =
+              eligibleVoters.length > 0 &&
+              eligibleVoters.every((pl) => gameState.votes[pl.id] !== undefined);
+
+            if (allVoted) {
+              gameState.status = 'CLAIMING';
+              triggerBotClaimsIfNeeded();
+            }
+          } else if (gameState.status === 'CLAIMING') {
+            // Sprawdź, czy w fazie CLAIMING pozostali aktywni gracze mają już oznaczone swoje karty
+            const allClaimed =
+              remainingActive.length > 0 &&
+              remainingActive.every((pl) => gameState.claims[pl.id] !== undefined);
+
+            if (allClaimed) {
+              const conflicts = getClaimConflicts();
+              if (conflicts.length === 0) {
+                calculateRoundScoresAndTransition();
+              }
+            }
+          }
+
+          saveHostBackupState();
           broadcastStateFromHost();
           break;
         }
@@ -1676,8 +1919,13 @@
       });
 
       // Budujemy dane dla wszystkich kart 1 .. N w kolejności stołowej
+      const maxCardNum = Math.max(
+        activePlayers.length,
+        ...Object.values(gameState.claims).map((n) => Number(n) || 0),
+        ...Object.values(gameState.votes).map((n) => Number(n) || 0)
+      );
       const cardsByNumber = [];
-      for (let cNum = 1; cNum <= activePlayers.length; cNum++) {
+      for (let cNum = 1; cNum <= maxCardNum; cNum++) {
         const owner = cardOwnerMap[cNum];
         const votersForThisCard = nonStorytellers.filter((v) => gameState.votes[v.id] === cNum);
         const isStorytellerCard = Boolean(owner && owner.id === storyteller.id);
@@ -2090,6 +2338,18 @@
 
     function renderAllViews() {
       const inRoom = Boolean(gameState.roomCode && gameState.players.length > 0);
+
+      // Ustaw wygląd klikalnego logo w zależności od tego, czy gracz jest przy stole
+      const logoBlock = document.getElementById('headerLogoBlock');
+      if (logoBlock) {
+        if (inRoom) {
+          logoBlock.classList.add('cursor-pointer', 'hover:opacity-80', 'active:scale-95');
+          logoBlock.title = 'Kliknij, aby opuścić stół';
+        } else {
+          logoBlock.classList.remove('cursor-pointer', 'hover:opacity-80', 'active:scale-95');
+          logoBlock.title = 'Dixit Companion';
+        }
+      }
 
       document.getElementById('viewWelcome').classList.toggle('hidden', inRoom);
       document.getElementById('viewLobby').classList.toggle('hidden', !inRoom || gameState.status !== 'LOBBY');
