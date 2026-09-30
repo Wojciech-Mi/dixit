@@ -1,0 +1,3149 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+  <title>Dixit Companion – Licznik i Głosowanie</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PeerJS dla połączeń między telefonami bez konfiguracji oraz Socket.io dla lokalnego serwera Node.js -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+  <!-- Biblioteka generowania kodów QR -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Ikony Lucide -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+
+    :root {
+      --font-display: 'Cinzel', serif;
+      --font-sans: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: radial-gradient(circle at top, #1e1b4b 0%, #0f172a 60%, #020617 100%);
+      color: #f8fafc;
+      min-height: 100vh;
+      overflow-x: hidden;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .font-magical {
+      font-family: var(--font-display);
+    }
+
+    /* Tryb dla osób słabowidzących (Wysoki Kontrast + Powiększenie) */
+    body.a11y-mode {
+      background: #000000 !important;
+      color: #ffffff !important;
+      font-size: 120%;
+    }
+
+    body.a11y-mode .a11y-card-btn {
+      min-height: 115px !important;
+      font-size: 3.2rem !important;
+      border-width: 4px !important;
+      border-color: #facc15 !important;
+      background-color: #111827 !important;
+      color: #fef08a !important;
+      font-weight: 800 !important;
+    }
+
+    body.a11y-mode .a11y-card-btn.selected {
+      background-color: #facc15 !important;
+      color: #000000 !important;
+      border-color: #ffffff !important;
+      box-shadow: 0 0 0 4px #facc15 !important;
+    }
+
+    body.a11y-mode .a11y-text-lg {
+      font-size: 1.5rem !important;
+      line-height: 2rem !important;
+      font-weight: 700 !important;
+    }
+
+    body.a11y-mode .a11y-panel {
+      background: #090d16 !important;
+      border: 3px solid #facc15 !important;
+    }
+
+    /* Wygląd kart Dixit (proporcje pionowej karty) */
+    .dixit-card-btn {
+      aspect-ratio: 2 / 3.05;
+      position: relative;
+      border-radius: 1rem;
+      transition: all 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+      background: radial-gradient(circle at 50% 25%, #1e293b 0%, #090d16 100%);
+      box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.6);
+    }
+
+    .dixit-card-btn::before {
+      content: '';
+      position: absolute;
+      inset: 5px;
+      border-radius: 0.7rem;
+      border: 1px dashed rgba(250, 204, 21, 0.22);
+      pointer-events: none;
+    }
+
+    .dixit-card-btn:hover:not(:disabled) {
+      transform: translateY(-4px) scale(1.02);
+    }
+
+    .dixit-card-btn.selected {
+      background: linear-gradient(145deg, #facc15 0%, #f59e0b 100%);
+      color: #090d16;
+      border-color: #ffffff !important;
+      transform: translateY(-5px) scale(1.04);
+      box-shadow: 0 12px 25px -4px rgba(245, 158, 11, 0.5);
+    }
+
+    .dixit-card-btn.selected::before {
+      border-color: rgba(9, 13, 22, 0.35);
+    }
+
+    /* Scena 3D do odwracania kart w fazie wyników */
+    .card-flip-scene {
+      perspective: 1100px;
+      width: 100%;
+    }
+
+    .card-flip-inner {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 2 / 3.15;
+      transition: transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+      transform-style: preserve-3d;
+    }
+
+    .card-flip-inner.is-flipped {
+      transform: rotateY(180deg);
+    }
+
+    .card-face {
+      position: absolute;
+      inset: 0;
+      backface-visibility: hidden;
+      -webkit-backface-visibility: hidden;
+      border-radius: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.35rem;
+      box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.65);
+    }
+
+    .card-face-front {
+      background: radial-gradient(circle at 50% 30%, #1e1b4b 0%, #090d16 100%);
+      border: 2px solid #334155;
+    }
+
+    .card-face-front::before {
+      content: '';
+      position: absolute;
+      inset: 5px;
+      border-radius: 0.7rem;
+      border: 1px dashed rgba(148, 163, 184, 0.25);
+      pointer-events: none;
+    }
+
+    .card-face-back {
+      background: radial-gradient(circle at 50% 20%, #1e293b 0%, #090d16 90%);
+      transform: rotateY(180deg);
+      border-width: 3px;
+      border-style: solid;
+    }
+
+    @keyframes pulseGold {
+      0%, 100% {
+        box-shadow: 0 0 15px rgba(250, 204, 21, 0.5), inset 0 0 12px rgba(250, 204, 21, 0.25);
+      }
+      50% {
+        box-shadow: 0 0 32px rgba(250, 204, 21, 0.95), inset 0 0 22px rgba(250, 204, 21, 0.45);
+      }
+    }
+
+    @keyframes floatUp {
+      0% { transform: translateY(12px); opacity: 0; }
+      100% { transform: translateY(0); opacity: 1; }
+    }
+
+    .storyteller-card-glow {
+      animation: pulseGold 2s infinite ease-in-out;
+    }
+
+    .animate-float-up {
+      animation: floatUp 0.4s ease-out forwards;
+    }
+
+    /* Stylizacja paska przewijania */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.4);
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="antialiased selection:bg-amber-400 selection:text-slate-950">
+
+  <!-- GÓRNY PASEK NAWIGACJI (Zawsze widoczny) -->
+  <header class="sticky top-0 z-30 backdrop-blur-md bg-slate-950/80 border-b border-slate-800/80 px-3 py-2.5">
+    <div class="max-w-3xl mx-auto flex items-center justify-between gap-2">
+      <!-- Logo i kod pokoju -->
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/20 text-slate-950 font-black text-lg">
+          ✦
+        </div>
+        <div>
+          <h1 class="font-magical text-base sm:text-lg font-extrabold tracking-wider text-amber-300 leading-none">
+            DIXIT
+          </h1>
+          <div id="headerRoomBadge" class="text-[11px] text-slate-400 font-semibold mt-0.5">
+            Tryb lokalny / P2P
+          </div>
+        </div>
+      </div>
+
+      <!-- Przyciski Narzędziowe: Lupa, Tryb Słabowidzący, Panel Hosta -->
+      <div class="flex items-center gap-1.5 sm:gap-2">
+        <!-- Przycisk Lupy (Aparat) -->
+        <button
+          id="btnOpenMagnifier"
+          onclick="openMagnifierModal()"
+          class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 font-bold text-xs sm:text-sm transition active:scale-95 shadow-sm"
+          title="Lupa – przybliż karty na stole aparatem"
+        >
+          <i data-lucide="zoom-in" class="w-4 h-4 text-amber-400"></i>
+          <span>Lupa</span>
+        </button>
+
+        <!-- Przycisk dla Słabowidzących (Powiększenie UI) -->
+        <button
+          id="btnToggleA11y"
+          onclick="toggleAccessibilityMode()"
+          class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-600/50 text-slate-200 font-bold text-xs sm:text-sm transition active:scale-95"
+          title="Tryb dla słabowidzących – wielkie przyciski i wysoki kontrast"
+        >
+          <i data-lucide="eye" class="w-4 h-4 text-emerald-400"></i>
+          <span id="a11yBtnLabel" class="hidden xs:inline">Duży UI</span>
+        </button>
+
+        <!-- Przycisk Hosta / Admina (Widoczny dla Hosta) -->
+        <button
+          id="btnHostPanel"
+          onclick="openHostModal()"
+          class="hidden items-center gap-1 px-2.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-300 font-bold text-xs sm:text-sm transition active:scale-95"
+          title="Panel Hosta / Administratora gry"
+        >
+          <i data-lucide="settings" class="w-4 h-4"></i>
+          <span class="hidden sm:inline">Host</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- BANER OSTATNIEGO OKRĄŻENIA (Gdy włączono koniec gry w trybie Endless) -->
+  <div id="lastLapBanner" class="hidden bg-gradient-to-r from-amber-600/90 via-orange-600/90 to-amber-600/90 text-white text-center py-1.5 px-4 text-xs sm:text-sm font-bold shadow-md">
+    🏁 OSTATNIE OKRĄŻENIE! Gramy do końca obecnej kolejki, aby każdy był Bajarzem tyle samo razy.
+  </div>
+
+  <!-- GŁÓWNY KONTENER WIDOKÓW -->
+  <main class="max-w-3xl mx-auto px-2.5 sm:px-4 py-4 pb-24">
+
+    <!-- POWIADOMIENIA TOAST (Zamiast alert/confirm) -->
+    <div id="toastContainer" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-[92%] max-w-md pointer-events-none"></div>
+
+    <!-- ========================================== -->
+    <!-- WIDOK 1: EKRAN POWITALNY / DOŁĄCZANIE      -->
+    <!-- ========================================== -->
+    <section id="viewWelcome" class="space-y-5">
+      <div class="a11y-panel rounded-3xl bg-slate-900/80 border border-slate-800 p-5 sm:p-6 shadow-2xl space-y-5">
+        <div class="text-center space-y-1.5">
+          <h2 class="font-magical text-2xl sm:text-3xl font-extrabold text-white">
+            Dixit Companion
+          </h2>
+          <p class="text-slate-400 text-xs sm:text-sm a11y-text-lg">
+            Jeśli przypadkiem zamkniesz przeglądarkę w trakcie gry, Twoje punkty i miejsce przy stole zostaną zachowane.
+          </p>
+        </div>
+
+        <!-- Formularz Gracza -->
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+              Twój Nick przy stole
+            </label>
+            <input
+              id="inputPlayerName"
+              type="text"
+              maxlength="16"
+              placeholder="np. Bartek, Kasia..."
+              class="w-full px-4 py-3.5 rounded-2xl bg-slate-950 border-2 border-slate-700 focus:border-amber-400 focus:outline-none text-white font-bold text-lg transition"
+            />
+          </div>
+
+          <!-- Kod pokoju (wypełniany automatycznie z QR kodu lub ręcznie) -->
+          <div class="pt-2 border-t border-slate-800/80">
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+              Kod Stołu (zostaw puste, jeśli zakładasz nowy stół jako Host)
+            </label>
+            <input
+              id="inputRoomCode"
+              type="text"
+              maxlength="12"
+              placeholder="np. DIXIT1 (opcjonalnie)"
+              class="w-full px-4 py-3 rounded-2xl bg-slate-950/70 border border-slate-700 focus:border-indigo-400 focus:outline-none text-amber-300 font-mono font-bold uppercase tracking-widest text-base"
+            />
+          </div>
+
+          <!-- Przyciski akcji -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+            <button
+              onclick="handleCreateOrJoinRoom(true)"
+              class="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-extrabold text-base shadow-lg shadow-amber-500/20 transition active:scale-98 flex items-center justify-center gap-2"
+            >
+              <i data-lucide="crown" class="w-5 h-5"></i>
+              <span>Załóż Stół (Host)</span>
+            </button>
+
+            <button
+              onclick="handleCreateOrJoinRoom(false)"
+              class="w-full py-4 px-5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-base shadow-lg shadow-indigo-600/20 transition active:scale-98 flex items-center justify-center gap-2"
+            >
+              <i data-lucide="log-in" class="w-5 h-5"></i>
+              <span>Dołącz do Stołu</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Dolny pasek: Instrukcja uruchomienia na własnym PC (Node.js) -->
+        <div class="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+          <span>Chcesz postawić lokalny serwer na swoim PC?</span>
+          <button
+            onclick="openServerSetupModal()"
+            class="text-amber-400 hover:text-amber-300 font-bold underline flex items-center gap-1"
+          >
+            <i data-lucide="terminal" class="w-3.5 h-3.5"></i>
+            Pobierz gotowy serwer Node.js
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- WIDOK 2: LOBBY (Kolejność, QR, Ustawienia) -->
+    <!-- ========================================== -->
+    <section id="viewLobby" class="hidden space-y-4">
+      <!-- Karta kodu QR i zapraszania graczy -->
+      <div class="a11y-panel rounded-3xl bg-slate-900/85 border border-slate-800 p-4 sm:p-5 shadow-xl">
+        <div class="flex flex-col sm:flex-row items-center gap-4">
+          <!-- Wygenerowany kod QR -->
+          <div class="bg-white p-3 rounded-2xl shadow-md shrink-0">
+            <div id="qrcodeContainer" class="w-36 h-36 flex items-center justify-center"></div>
+          </div>
+
+          <div class="space-y-2 text-center sm:text-left flex-1">
+            <h3 class="text-lg font-extrabold text-white">
+              Kod Stołu: <span id="lobbyRoomCodeDisplay" class="text-amber-400 font-mono tracking-wider">----</span>
+            </h3>
+            <p class="text-xs text-slate-300 leading-relaxed a11y-text-lg">
+              Zeskanuj kod QR aparatem lub wpisz kod stołu na telefonie. Kolejność na liście poniżej określa kolejność <strong>Bajarzy</strong>.
+            </p>
+            <div class="flex flex-wrap gap-2 justify-center sm:justify-start pt-1">
+              <button
+                onclick="copyJoinLink()"
+                class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-bold text-slate-200 flex items-center gap-1.5"
+              >
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                Kopiuj link
+              </button>
+              <button
+                id="btnAddBot"
+                onclick="addSimulatedPlayer()"
+                class="px-3 py-1.5 rounded-xl bg-indigo-950 hover:bg-indigo-900 border border-indigo-500/40 text-xs font-bold text-indigo-200 flex items-center gap-1.5"
+                title="Dodaj wirtualnego gracza, aby przetestować rozgrywkę na jednym telefonie"
+              >
+                <i data-lucide="user-plus" class="w-3.5 h-3.5 text-amber-400"></i>
+                + Dodaj gracza testowego (Bot)
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lista Graczy i ustalanie kolejności Bajarzy -->
+      <div class="a11y-panel rounded-3xl bg-slate-900/85 border border-slate-800 p-4 sm:p-5 shadow-xl space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base sm:text-lg font-extrabold text-white flex items-center gap-2">
+              <i data-lucide="users" class="w-5 h-5 text-amber-400"></i>
+              Gracze przy stole (<span id="lobbyPlayerCount">0</span>)
+            </h3>
+            <p class="text-xs text-slate-400">
+              Kliknij swoje kółeczko, aby zmienić kolor (Host może zmieniać wszystkim). Strzałki ▲▼ ustalają kolejność Bajarzy.
+            </p>
+          </div>
+        </div>
+
+        <div id="lobbyPlayerList" class="space-y-2">
+          <!-- Wypełniane dynamicznie -->
+        </div>
+      </div>
+
+      <!-- Ustawienia Gry (Widoczne i edytowalne dla Hosta, podgląd dla graczy) -->
+      <div class="a11y-panel rounded-3xl bg-slate-900/85 border border-slate-800 p-4 sm:p-5 shadow-xl space-y-4">
+        <h3 class="text-base font-extrabold text-white flex items-center gap-2">
+          <i data-lucide="Sliders" class="w-5 h-5 text-amber-400"></i>
+          Warunek zwycięstwa i tryb gry
+        </h3>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2" id="winModeButtons">
+          <button onclick="updateGameSettings('POINTS', 30)" id="modeBtn30" class="py-3 px-3 rounded-2xl border-2 border-amber-400 bg-amber-500/20 text-white font-extrabold text-sm transition">
+            🏆 30 punktów
+            <span class="block text-[10px] font-normal text-amber-200">Klasyczny</span>
+          </button>
+          <button onclick="updateGameSettings('POINTS', 45)" id="modeBtn45" class="py-3 px-3 rounded-2xl border border-slate-700 bg-slate-950/60 text-slate-300 font-bold text-sm transition">
+            🏆 45 punktów
+            <span class="block text-[10px] font-normal text-slate-400">Dłuższa gra</span>
+          </button>
+          <button onclick="updateGameSettings('POINTS', 60)" id="modeBtn60" class="py-3 px-3 rounded-2xl border border-slate-700 bg-slate-950/60 text-slate-300 font-bold text-sm transition">
+            🏆 60 punktów
+            <span class="block text-[10px] font-normal text-slate-400">Dla 7-10 osób</span>
+          </button>
+          <button onclick="updateGameSettings('ENDLESS', 0)" id="modeBtnEndless" class="py-3 px-3 rounded-2xl border border-slate-700 bg-slate-950/60 text-slate-300 font-bold text-sm transition">
+            ♾️️ Endless
+            <span class="block text-[10px] font-normal text-slate-400">Do decyzji Hosta</span>
+          </button>
+        </div>
+
+        <!-- Opcje tempa rozgrywki (Szybkie odsłanianie + Automatyczna kolejna runda) -->
+        <div class="space-y-2">
+          <label class="flex items-center justify-between gap-3 p-3 rounded-2xl bg-slate-950/70 border border-slate-800 cursor-pointer hover:border-slate-700 transition">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="zap" class="w-4 h-4 text-amber-400 shrink-0"></i>
+              <div>
+                <div class="text-xs sm:text-sm font-bold text-white">Szybkie odsłanianie kart</div>
+                <div class="text-[11px] text-slate-400">Odkrywaj karty co 1.3s zamiast domyślnych 2 sekund</div>
+              </div>
+            </div>
+            <input
+              id="checkboxFastRevealLobby"
+              type="checkbox"
+              onchange="toggleFastRevealSetting(this.checked)"
+              class="w-5 h-5 accent-amber-400 rounded cursor-pointer shrink-0"
+            />
+          </label>
+
+          <label class="flex items-center justify-between gap-3 p-3 rounded-2xl bg-slate-950/70 border border-slate-800 cursor-pointer hover:border-slate-700 transition">
+            <div class="flex items-center gap-2.5">
+              <i data-lucide="timer" class="w-4 h-4 text-amber-400 shrink-0"></i>
+              <div>
+                <div class="text-xs sm:text-sm font-bold text-white">Automatyczna następna runda (15s)</div>
+                <div class="text-[11px] text-slate-400">Po podsumowaniu punktów gra sama przejdzie dalej po 15 sekundach</div>
+              </div>
+            </div>
+            <input
+              id="checkboxAutoNextLobby"
+              type="checkbox"
+              onchange="toggleAutoNextRoundSetting(this.checked)"
+              class="w-5 h-5 accent-amber-400 rounded cursor-pointer shrink-0"
+            />
+          </label>
+        </div>
+
+        <div class="text-xs text-slate-400 bg-slate-950/70 rounded-2xl p-3 border border-slate-800 space-y-1">
+          <div class="font-bold text-slate-200">Zasady punktacji:</div>
+          <div>• Trafienie karty Bajarza: <strong>+3 pkt</strong> dla zgadujących i Bajarza.</div>
+          <div>• Gdy nikt nie zgadnie lub wszyscy zgadną: Bajarz <strong>0 pkt</strong>, pozostali <strong>+2 pkt</strong>.</div>
+          <div>• Zmyłki (głosy innych na Twoją kartę): <strong>+1 pkt za każdy głos</strong> (zawsze, bez limitu).</div>
+        </div>
+
+        <!-- Przycisk START (Tylko dla Hosta) -->
+        <div id="hostStartContainer" class="pt-1">
+          <button
+            onclick="startGame()"
+            class="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-slate-950 font-black text-lg shadow-xl shadow-emerald-500/20 transition active:scale-98 flex items-center justify-center gap-2"
+          >
+            <i data-lucide="play" class="w-6 h-6 fill-current"></i>
+            <span>ROZPOCZNIJ ROZGRYWKĘ</span>
+          </button>
+        </div>
+        <div id="guestWaitLobbyMsg" class="hidden text-center py-3 text-amber-300 font-bold text-sm animate-pulse">
+          Oczekiwanie na uruchomienie gry przez Hosta...
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- WIDOK 3: AKTYWNA ROZGRYWKA                 -->
+    <!-- ========================================== -->
+    <section id="viewGame" class="hidden space-y-4">
+      
+      <!-- Pasek Informacyjny Rundy + Szybki Podgląd Punktów -->
+      <div class="a11y-panel rounded-2xl bg-slate-900/90 border border-slate-800 p-3.5 shadow-lg">
+        <div class="flex items-center justify-between gap-2 mb-2.5">
+          <div class="flex items-center gap-2">
+            <span id="roundBadge" class="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-300 font-extrabold text-xs">
+              Runda 1
+            </span>
+            <span id="winConditionBadge" class="text-xs text-slate-400 font-semibold">
+              Cel: 30 pkt
+            </span>
+          </div>
+
+          <!-- Przełącznik aktywnego gracza (tylko w trybie testowania z botami na 1 ekranie) -->
+          <div id="botSwitcherWrapper" class="hidden items-center gap-1.5">
+            <span class="text-[11px] text-indigo-300 font-bold">Widok:</span>
+            <select
+              id="selectActivePov"
+              onchange="switchLocalPov(this.value)"
+              class="bg-indigo-950 border border-indigo-500/50 text-white text-xs font-bold rounded-lg px-2 py-1 focus:outline-none"
+            ></select>
+          </div>
+        </div>
+
+        <!-- Kto jest aktualnie Bajarzem -->
+        <div class="flex items-center justify-between bg-slate-950/80 rounded-xl px-3.5 py-2.5 border border-slate-800">
+          <div class="flex items-center gap-2.5">
+            <div id="storytellerAvatar" class="w-8 h-8 rounded-full flex items-center justify-center font-black text-slate-950 text-sm shadow">
+              B
+            </div>
+            <div>
+              <div class="text-[11px] uppercase tracking-wider text-slate-400 font-bold">
+                Bajarz
+              </div>
+              <div id="storytellerNameDisplay" class="text-base font-extrabold text-amber-300 a11y-text-lg">
+                ---
+              </div>
+            </div>
+          </div>
+          <button
+            onclick="toggleScoreboardDrawer()"
+            class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1 border border-slate-700"
+          >
+            <i data-lucide="trophy" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span>Tabela</span>
+          </button>
+        </div>
+
+        <!-- Rozwijana mini-tabela wyników -->
+        <div id="scoreboardDrawer" class="hidden mt-3 pt-3 border-t border-slate-800 space-y-1.5">
+          <!-- Wypełniane dynamicznie -->
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------- -->
+      <!-- FAZA 1: PRZYGOTOWANIE KART PRZEZ BAJARZA           -->
+      <!-- -------------------------------------------------- -->
+      <div id="phaseStorytellerPrep" class="hidden a11y-panel rounded-3xl bg-slate-900/90 border border-slate-800 p-5 sm:p-6 shadow-2xl text-center space-y-5">
+        <!-- Widok dla Bajarza -->
+        <div id="prepStorytellerView" class="space-y-4">
+          <h2 class="font-magical text-2xl sm:text-3xl font-extrabold text-amber-300">
+            📖 Jesteś Bajarzem!
+          </h2>
+
+          <ol class="text-left text-sm sm:text-base text-slate-200 space-y-2.5 bg-slate-950/80 p-4 rounded-2xl border border-slate-800 a11y-text-lg">
+            <li class="flex items-start gap-2.5">
+              <span class="w-6 h-6 rounded-full bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">1</span>
+              <span>Wybierz kartę z ręki i powiedz skojarzenie.</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <span class="w-6 h-6 rounded-full bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">2</span>
+              <span>Zbierz karty od pozostałych graczy (łącznie <strong id="prepTotalCardsCount" class="text-amber-300">0</strong>).</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <span class="w-6 h-6 rounded-full bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">3</span>
+              <span>Potasuj je i rozłóż na stole od <strong>1</strong> do <strong id="prepMaxCardNum" class="text-amber-300">0</strong>.</span>
+            </li>
+          </ol>
+
+          <button
+            onclick="storytellerConfirmCardsLaid()"
+            class="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black text-lg shadow-xl shadow-amber-500/25 transition active:scale-98 flex items-center justify-center gap-2"
+          >
+            <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+            <span>KARTY ROZŁOŻONE – GŁOSUJEMY!</span>
+          </button>
+        </div>
+
+        <!-- Widok dla pozostałych graczy -->
+        <div id="prepWaitingView" class="space-y-3 py-3">
+          <h2 class="font-magical text-xl sm:text-2xl font-extrabold text-white">
+            🃏 Bajarzem jest <span id="prepStorytellerName" class="text-amber-400">---</span>
+          </h2>
+          <p class="text-slate-300 text-sm sm:text-base max-w-md mx-auto a11y-text-lg">
+            Wysłuchaj skojarzenia, przekaż Bajarzowi jedną kartę ze swojej ręki i poczekaj na rozłożenie kart na stole.
+          </p>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------- -->
+      <!-- FAZA 2: GŁOSOWANIE NA KARTĘ BAJARZA (1 .. N)       -->
+      <!-- -------------------------------------------------- -->
+      <div id="phaseVoting" class="hidden space-y-4">
+        <!-- Widok głosowania dla zwykłego gracza -->
+        <div id="votingPlayerBox" class="a11y-panel rounded-3xl bg-slate-900/90 border border-slate-800 p-3.5 sm:p-5 shadow-2xl space-y-4">
+          <div class="flex items-center justify-between gap-2">
+            <h2 class="text-lg sm:text-2xl font-extrabold text-white">
+              Która karta należy do Bajarza?
+            </h2>
+            <button
+              onclick="openMagnifierModal()"
+              class="shrink-0 p-2.5 rounded-2xl bg-indigo-600/30 border border-indigo-400/50 text-amber-300 hover:bg-indigo-600/50 transition"
+              title="Otwórz lupę z zamrażaniem obrazu"
+            >
+              <i data-lucide="zoom-in" class="w-5 h-5"></i>
+            </button>
+          </div>
+
+          <!-- Poziomy układ kart 1 .. N (do 6 kart w jednej linii) -->
+          <div id="votingButtonsGrid" class="pt-1">
+            <!-- Generowane dynamicznie w JS -->
+          </div>
+
+          <!-- Potwierdzenie oddania głosu -->
+          <div id="voteConfirmedBanner" class="hidden p-3 rounded-2xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-center font-extrabold text-sm">
+            ✓ Wybrano kartę nr <span id="myVotedCardNum" class="text-amber-300 text-base"></span> (możesz jeszcze zmienić wybór)
+          </div>
+        </div>
+
+        <!-- Widok oczekiwania dla Bajarza podczas głosowania -->
+        <div id="votingStorytellerBox" class="hidden a11y-panel rounded-3xl bg-slate-900/90 border border-slate-800 p-5 text-center space-y-2">
+          <h3 class="text-xl font-extrabold text-white">
+            🤫 Gracze teraz głosują...
+          </h3>
+          <p class="text-xs sm:text-sm text-slate-300 a11y-text-lg">
+            Gdy wszyscy oddadzą głos, wskażesz numer swojej karty.
+          </p>
+        </div>
+
+        <!-- Status kto już zagłosował -->
+        <div class="a11y-panel rounded-2xl bg-slate-900/80 border border-slate-800 p-3.5 space-y-2">
+          <div class="flex items-center justify-between text-xs font-bold text-slate-400">
+            <span>GŁOSOWANIE</span>
+            <span id="votingProgressCounter" class="text-amber-300">0 / 0</span>
+          </div>
+          <div id="votingStatusPills" class="flex flex-wrap gap-2">
+            <!-- Pigułki graczy -->
+          </div>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------- -->
+      <!-- FAZA 3: OZNACZANIE WŁASNEJ KARTY + KONFLIKTY       -->
+      <!-- -------------------------------------------------- -->
+      <div id="phaseClaiming" class="hidden space-y-4">
+        
+        <!-- Ostrzeżenie o konflikcie (Widoczne dopiero gdy wszyscy wybrali i >= 2 graczy wskazało tę samą kartę) -->
+        <div id="conflictAlertBox" class="hidden rounded-3xl bg-rose-950/95 border-2 border-rose-500 p-4 sm:p-5 shadow-2xl space-y-2.5">
+          <div class="flex items-center gap-2 text-rose-300 font-black text-base sm:text-lg">
+            <i data-lucide="alert-triangle" class="w-6 h-6 text-rose-400 shrink-0"></i>
+            <span>Konflikt kart – poprawcie wybór:</span>
+          </div>
+          <div id="conflictDetailsList" class="space-y-1 text-sm sm:text-base font-bold text-white bg-rose-900/50 p-3 rounded-2xl border border-rose-400/40">
+            <!-- Np. Kartę nr 3 wskazali: Bartek i Marek -->
+          </div>
+        </div>
+
+        <!-- Panel wyboru własnej karty (Tajny wybór dla każdego gracza) -->
+        <div class="a11y-panel rounded-3xl bg-slate-900/90 border border-slate-800 p-3.5 sm:p-5 shadow-2xl space-y-4">
+          <h2 class="text-lg sm:text-2xl font-extrabold text-white">
+            Który numer na stole ma TWOJA karta?
+          </h2>
+
+          <!-- Pozioma siatka kart 1 .. N do wskazania swojej karty -->
+          <div id="claimingButtonsGrid" class="pt-1">
+            <!-- Generowane dynamicznie w JS -->
+          </div>
+
+          <div id="claimConfirmedBanner" class="hidden p-3 rounded-2xl bg-amber-500/15 border border-amber-400/40 text-amber-200 text-center text-sm font-bold">
+            ✓ Twoja karta to nr <span id="myClaimedCardNum" class="text-white text-base underline"></span>
+          </div>
+        </div>
+
+        <!-- Status kto już oznaczył swoją kartę (Bez zdradzania numeru karty!) -->
+        <div class="a11y-panel rounded-2xl bg-slate-900/80 border border-slate-800 p-3.5 space-y-2">
+          <div class="flex items-center justify-between text-xs font-bold text-slate-400">
+            <span>GOTOWOŚĆ GRACZY</span>
+            <span id="claimingProgressCounter" class="text-amber-300">0 / 0</span>
+          </div>
+          <div id="claimingStatusPills" class="flex flex-wrap gap-2"></div>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------- -->
+      <!-- FAZA 4: ANIMOWANE ODSŁANIANIE KART I WYNIKI RUNDY  -->
+      <!-- -------------------------------------------------- -->
+      <div id="phaseReveal" class="hidden space-y-4">
+        <div class="a11y-panel rounded-3xl bg-slate-900/90 border border-slate-800 p-3.5 sm:p-5 shadow-2xl space-y-4">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <h2 class="font-magical text-lg sm:text-2xl font-extrabold text-amber-300">
+              Odkrywanie kart
+            </h2>
+            <button
+              id="btnSkipRevealAnim"
+              onclick="revealAllCardsImmediately()"
+              class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 border border-slate-700"
+            >
+              Odkryj wszystkie ⏩
+            </button>
+          </div>
+
+          <!-- Poziomy układ kart 1 .. N (taki sam jak przy głosowaniu) z odwracaniem 3D -->
+          <div id="revealCardsSequence" class="pt-2 pb-1">
+            <!-- Karty 1..N w rzędach poziomych -->
+          </div>
+
+          <!-- Baner werdyktu rundy (pojawia się po odsłonięciu karty Bajarza) -->
+          <div id="revealClimaxBanner" class="hidden p-4 rounded-2xl bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-500/20 border-2 border-amber-400 text-center space-y-1 animate-float-up">
+            <div id="revealClimaxTitle" class="text-lg sm:text-xl font-black text-amber-300"></div>
+            <div id="revealClimaxSubtitle" class="text-xs sm:text-sm text-slate-200 a11y-text-lg"></div>
+          </div>
+        </div>
+
+        <!-- Podsumowanie punktów zdobytych w tej rundzie i Tabela -->
+        <div id="revealScoreSummaryCard" class="hidden a11y-panel rounded-3xl bg-slate-900/90 border border-slate-800 p-4 sm:p-5 shadow-2xl space-y-4 animate-float-up">
+          <h3 class="text-base sm:text-lg font-extrabold text-white flex items-center gap-2">
+            <i data-lucide="award" class="w-5 h-5 text-amber-400"></i>
+            Klasyfikacja po tej rundzie
+          </h3>
+          <div id="revealStandingsList" class="space-y-2"></div>
+
+          <!-- Przycisk przejścia do następnej rundy (Tylko dla Bajarza i Hosta + opcjonalny licznik 15s) -->
+          <div class="pt-2 space-y-2">
+            <button
+              id="btnNextRoundAction"
+              onclick="advanceToNextRound()"
+              class="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black text-base sm:text-lg shadow-xl shadow-amber-500/20 transition active:scale-98 flex items-center justify-center gap-2"
+            >
+              <span>NASTĘPNA RUNDA</span>
+              <span id="nextRoundBtnCountdown" class="hidden text-sm font-extrabold opacity-85">(15s)</span>
+              <i data-lucide="arrow-right" class="w-5 h-5"></i>
+            </button>
+
+            <div
+              id="nextRoundGuestInfo"
+              class="hidden py-3 px-4 rounded-2xl bg-slate-950/80 border border-slate-800 text-center text-xs sm:text-sm font-bold text-slate-300"
+            >
+              <span id="nextRoundGuestText">Oczekiwanie na przejście do kolejnej rundy...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- -------------------------------------------------- -->
+      <!-- FAZA 5: KONIEC GRY I PODIUM ZWYCIĘZCÓW             -->
+      <!-- -------------------------------------------------- -->
+      <div id="phaseGameOver" class="hidden a11y-panel rounded-3xl bg-slate-900/90 border border-slate-800 p-5 sm:p-6 shadow-2xl text-center space-y-6">
+        <div class="space-y-2">
+          <div class="text-5xl">👑</div>
+          <h2 class="font-magical text-3xl font-extrabold text-white">
+            Koniec Gry
+          </h2>
+          <p id="winnerAnnouncementText" class="text-amber-300 font-bold text-lg"></p>
+        </div>
+
+        <div id="finalStandingsList" class="space-y-2.5 text-left"></div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+          <button
+            onclick="restartGameKeepPlayers()"
+            class="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-black text-base shadow-lg flex items-center justify-center gap-2"
+          >
+            <i data-lucide="rotate-ccw" class="w-5 h-5"></i>
+            <span>Zagraj ponownie (ten sam skład)</span>
+          </button>
+          <button
+            onclick="returnToLobby()"
+            class="w-full py-4 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-base border border-slate-700 flex items-center justify-center gap-2"
+          >
+            <i data-lucide="users" class="w-5 h-5"></i>
+            <span>Wróć do Lobby</span>
+          </button>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- ======================================================== -->
+  <!-- MODAL 1: LUPA STOŁOWA Z KAMERĄ I ZAMRAŻANIEM KADRU       -->
+  <!-- ======================================================== -->
+  <div id="modalMagnifier" class="fixed inset-0 z-50 hidden bg-black/95 flex flex-col justify-between">
+    <!-- Górny pasek lupy -->
+    <div class="p-3 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <i data-lucide="zoom-in" class="w-5 h-5 text-amber-400"></i>
+        <span class="font-extrabold text-white text-sm sm:text-base">
+          Lupa Stołowa (Podgląd kart bez robienia zdjęć)
+        </span>
+      </div>
+      <button
+        onclick="closeMagnifierModal()"
+        class="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs sm:text-sm flex items-center gap-1"
+      >
+        <i data-lucide="x" class="w-4 h-4"></i>
+        Zamknij
+      </button>
+    </div>
+
+    <!-- Obszar Wideo (Z obsługą powiększenia i przesuwania palcem) -->
+    <div
+      id="magnifierViewport"
+      class="relative flex-1 overflow-hidden bg-black flex items-center justify-center touch-none"
+    >
+      <video
+        id="magnifierVideo"
+        autoplay
+        playsinline
+        muted
+        class="max-w-full max-h-full object-contain transition-transform duration-75 origin-center"
+      ></video>
+
+      <!-- Informacja gdy obraz jest zamrożony -->
+      <div
+        id="frozenBadge"
+        class="hidden absolute top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full bg-sky-500 text-slate-950 font-black text-xs uppercase tracking-wider shadow-lg"
+      >
+        ❄️ Kadr zatrzymany – możesz przesuwać palcem
+      </div>
+
+      <!-- Komunikat awaryjny jeśli kamera jest niedostępna -->
+      <div id="cameraErrorBox" class="hidden max-w-sm p-6 text-center space-y-3">
+        <div class="text-4xl">📷</div>
+        <h4 class="text-lg font-extrabold text-white">Brak dostępu do aparatu</h4>
+        <p class="text-xs sm:text-sm text-slate-300 leading-relaxed">
+          Upewnij się, że zezwoliłeś przeglądarce na dostęp do kamery oraz że strona jest otwarta przez bezpieczne połączenie <strong>HTTPS</strong> (np. przez Cloudflare Tunnel lub hosting).
+        </p>
+      </div>
+    </div>
+
+    <!-- Dolny panel sterowania zoomem i zamrażaniem obrazu -->
+    <div class="p-4 bg-slate-950/95 border-t border-slate-800 space-y-3">
+      <div class="max-w-md mx-auto space-y-3">
+        <div class="flex items-center gap-3">
+          <span class="text-xs font-extrabold text-slate-300 w-16">Zoom: <span id="zoomValueLabel" class="text-amber-400">1.0x</span></span>
+          <input
+            id="magnifierZoomSlider"
+            type="range"
+            min="1"
+            max="5"
+            step="0.1"
+            value="1.5"
+            oninput="updateMagnifierZoom(this.value)"
+            class="w-full accent-amber-400 h-3 bg-slate-800 rounded-lg cursor-pointer"
+          />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <button
+            id="btnFreezeFrame"
+            onclick="toggleFreezeCamera()"
+            class="py-3.5 px-4 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg"
+          >
+            <i data-lucide="pause" class="w-5 h-5"></i>
+            <span id="freezeBtnText">Zatrzymaj kadr</span>
+          </button>
+
+          <button
+            onclick="closeMagnifierModal()"
+            class="py-3.5 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm sm:text-base border border-slate-700"
+          >
+            Wróć do głosowania
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL 2: PANEL HOSTA / ADMINISTRATORA                    -->
+  <!-- ======================================================== -->
+  <div id="modalHost" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="a11y-panel w-full max-w-md rounded-3xl bg-slate-900 border border-slate-700 p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <i data-lucide="shield-alert" class="w-5 h-5 text-amber-400"></i>
+          <h3 class="text-lg font-extrabold text-white">Panel Hosta / Admina</h3>
+        </div>
+        <button onclick="closeHostModal()" class="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Akcje ratunkowe rundy -->
+      <div class="space-y-2">
+        <div class="text-xs font-bold uppercase tracking-wider text-slate-400">
+          Zarządzanie bieżącą rundą
+        </div>
+        <div class="grid grid-cols-1 gap-2">
+          <button
+            onclick="hostForceNextStep()"
+            class="w-full py-3 px-4 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-300 font-bold text-sm flex items-center justify-between"
+          >
+            <span>⏭️ Wymuś kolejny krok (uzupełnij brakujących)</span>
+            <i data-lucide="chevron-right" class="w-4 h-4"></i>
+          </button>
+
+          <button
+            onclick="hostSkipCurrentStoryteller()"
+            class="w-full py-3 px-4 rounded-2xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/50 text-indigo-200 font-bold text-sm flex items-center justify-between"
+          >
+            <span>🔄 Pomiń obecnego Bajarza (następny gracz)</span>
+            <i data-lucide="chevron-right" class="w-4 h-4"></i>
+          </button>
+
+          <button
+            onclick="hostToggleLastLap()"
+            id="btnHostLastLap"
+            class="w-full py-3 px-4 rounded-2xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 text-emerald-300 font-bold text-sm flex items-center justify-between"
+          >
+            <span>🏁 Ogłoś „Ostatnie Okrążenie” (koniec po kolejce)</span>
+            <i data-lucide="flag" class="w-4 h-4"></i>
+          </button>
+
+          <button
+            onclick="hostResetCurrentRound()"
+            class="w-full py-3 px-4 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/50 text-rose-300 font-bold text-sm flex items-center justify-between"
+          >
+            <span>↩️ Zresetuj obecną rundę (bez utraty punktów)</span>
+            <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+          </button>
+
+          <!-- Przełącznik szybkiego odsłaniania kart w trakcie gry -->
+          <label class="w-full py-3 px-4 rounded-2xl bg-slate-950 border border-slate-800 text-slate-200 font-bold text-sm flex items-center justify-between cursor-pointer">
+            <span>⚡ Szybkie odsłanianie kart (1.3s zamiast 2s)</span>
+            <input
+              id="checkboxFastRevealModal"
+              type="checkbox"
+              onchange="toggleFastRevealSetting(this.checked)"
+              class="w-5 h-5 accent-amber-400 rounded cursor-pointer"
+            />
+          </label>
+
+          <!-- Przełącznik automatycznej następnej rundy (15s) w trakcie gry -->
+          <label class="w-full py-3 px-4 rounded-2xl bg-slate-950 border border-slate-800 text-slate-200 font-bold text-sm flex items-center justify-between cursor-pointer">
+            <span>⏱️ Automatyczna następna runda (15s)</span>
+            <input
+              id="checkboxAutoNextModal"
+              type="checkbox"
+              onchange="toggleAutoNextRoundSetting(this.checked)"
+              class="w-5 h-5 accent-amber-400 rounded cursor-pointer"
+            />
+          </label>
+        </div>
+      </div>
+
+      <!-- Zarządzanie graczami (Pauza / AFK / Przejęcie sesji) -->
+      <div class="space-y-2 pt-2 border-t border-slate-800">
+        <div class="text-xs font-bold uppercase tracking-wider text-slate-400">
+          Gracze (Wstrzymaj gracza AFK lub edytuj punkty)
+        </div>
+        <p class="text-[11px] text-slate-400">
+          Wstrzymany gracz (AFK) zachowuje swoje punkty, ale gra nie czeka na jego głosy i pomija go w kolejce Bajarza, dopóki nie wróci do stołu.
+        </p>
+        <div id="hostPlayersControlList" class="space-y-2 max-h-60 overflow-y-auto pr-1">
+          <!-- Wypełniane dynamicznie -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL 3: GENERATOR SERWERA NODE.JS NA WŁASNY PC          -->
+  <!-- ======================================================== -->
+  <div id="modalServerSetup" class="fixed inset-0 z-50 hidden bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-700 p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-2">
+          <i data-lucide="server" class="w-5 h-5 text-amber-400"></i>
+          <h3 class="text-lg font-extrabold text-white">Uruchomienie na własnym PC / Hostingu</h3>
+        </div>
+        <button onclick="closeServerSetupModal()" class="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3 text-xs sm:text-sm text-slate-300 leading-relaxed">
+        <div class="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-200">
+          <strong>💡 Dobra wiadomość:</strong> Ta aplikacja posiada już wbudowany moduł <strong>WebRTC P2P (PeerJS)</strong>! Oznacza to, że telefony łączą się ze sobą bezpośrednio po zeskanowaniu kodu QR nawet bez instalowania Node.js.
+        </div>
+
+        <p>
+          Jeśli jednak chcesz uruchomić klasyczny serwer <strong>Node.js + Express + Socket.io</strong> lokalnie na swoim komputerze lub wrzucić go na darmowy hosting (np. Render.com), kliknij poniższy przycisk, aby pobrać gotowy plik <code>server.js</code>:
+        </p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+          <button
+            onclick="downloadNodeServerFile()"
+            class="py-3 px-4 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow"
+          >
+            <i data-lucide="download" class="w-4 h-4"></i>
+            Pobierz plik server.js
+          </button>
+          <button
+            onclick="downloadFrontendHtmlFile()"
+            class="py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow"
+          >
+            <i data-lucide="file-code" class="w-4 h-4"></i>
+            Pobierz ten plik (index.html)
+          </button>
+        </div>
+
+        <div class="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 font-mono text-xs text-slate-300 space-y-1.5">
+          <div class="text-amber-400 font-bold"># Instrukcja uruchomienia w 30 sekund na PC:</div>
+          <div>1. Umieść pobrany <strong>server.js</strong> oraz <strong>index.html</strong> w jednym folderze.</div>
+          <div>2. W terminalu wpisz: <span class="text-emerald-400">npm init -y && npm install express socket.io</span></div>
+          <div>3. Uruchom serwer: <span class="text-emerald-400">node server.js</span></div>
+          <div>4. (Opcjonalnie HTTPS dla kamery i gry poza Wi-Fi): <span class="text-sky-400">npx cloudflared tunnel --url http://localhost:3000</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- LOGIKA APLIKACJI (JAVASCRIPT)                            -->
+  <!-- ======================================================== -->
+  <script>
+    // Paleta 12 wyraźnie odróżniających się kolorów pionków (z brązowym i grafitowym)
+    const PLAYER_COLORS = [
+      { id: 'red', name: 'Czerwony', hex: '#ef4444', text: '#ffffff' },
+      { id: 'blue', name: 'Niebieski', hex: '#2563eb', text: '#ffffff' },
+      { id: 'green', name: 'Zielony', hex: '#16a34a', text: '#ffffff' },
+      { id: 'yellow', name: 'Żółty', hex: '#facc15', text: '#090d16' },
+      { id: 'orange', name: 'Pomarańczowy', hex: '#f97316', text: '#090d16' },
+      { id: 'purple', name: 'Fioletowy', hex: '#9333ea', text: '#ffffff' },
+      { id: 'pink', name: 'Różowy', hex: '#f472b6', text: '#090d16' },
+      { id: 'brown', name: 'Brązowy', hex: '#8b4513', text: '#ffffff' },
+      { id: 'graphite', name: 'Grafitowy', hex: '#4b5563', text: '#ffffff' },
+      { id: 'white', name: 'Biały', hex: '#f8fafc', text: '#090d16' },
+      { id: 'sky', name: 'Błękitny', hex: '#38bdf8', text: '#090d16' },
+      { id: 'lime', name: 'Limonkowy', hex: '#a3e635', text: '#090d16' }
+    ];
+
+    function getTextColorForHex(hex) {
+      const found = PLAYER_COLORS.find((c) => c.hex.toLowerCase() === String(hex).toLowerCase());
+      return found ? found.text : '#090d16';
+    }
+
+    function getColorNameForHex(hex) {
+      const found = PLAYER_COLORS.find((c) => c.hex.toLowerCase() === String(hex).toLowerCase());
+      return found ? found.name : 'Kolor';
+    }
+
+    // Zwraca pierwszy wolny kolor (lub preferowany, jeśli nie jest jeszcze zajęty przez innego gracza)
+    function getFirstFreeColor(preferredHex = null, excludePlayerId = null) {
+      const usedHexes = new Set(
+        (gameState.players || [])
+          .filter((p) => p.id !== excludePlayerId)
+          .map((p) => String(p.color).toLowerCase())
+      );
+      if (
+        preferredHex &&
+        PLAYER_COLORS.some((c) => c.hex.toLowerCase() === String(preferredHex).toLowerCase()) &&
+        !usedHexes.has(String(preferredHex).toLowerCase())
+      ) {
+        return preferredHex;
+      }
+      const freeColor = PLAYER_COLORS.find((c) => !usedHexes.has(c.hex.toLowerCase()));
+      return freeColor ? freeColor.hex : PLAYER_COLORS[0].hex;
+    }
+
+    // Zwraca kolejny wolny kolor z puli po kliknięciu w kółeczko gracza
+    function getNextFreeColor(currentHex, excludePlayerId) {
+      const usedHexes = new Set(
+        (gameState.players || [])
+          .filter((p) => p.id !== excludePlayerId)
+          .map((p) => String(p.color).toLowerCase())
+      );
+      const currentIndex = PLAYER_COLORS.findIndex(
+        (c) => c.hex.toLowerCase() === String(currentHex).toLowerCase()
+      );
+      const startIndex = currentIndex >= 0 ? currentIndex : 0;
+
+      for (let offset = 1; offset <= PLAYER_COLORS.length; offset++) {
+        const candidate = PLAYER_COLORS[(startIndex + offset) % PLAYER_COLORS.length];
+        if (!usedHexes.has(candidate.hex.toLowerCase())) {
+          return candidate.hex;
+        }
+      }
+      return currentHex;
+    }
+
+    // Klucze pamięci podręcznej (zapamiętywanie urządzenia po wyłączeniu przeglądarki)
+    const STORAGE_KEYS = {
+      PLAYER_ID: 'dixit_companion_player_id_v1',
+      PLAYER_NAME: 'dixit_companion_player_name_v1',
+      PLAYER_COLOR: 'dixit_companion_player_color_v1',
+      ROOM_CODE: 'dixit_companion_room_code_v1',
+      A11Y_MODE: 'dixit_companion_a11y_v1',
+      HOST_SAVED_STATE: 'dixit_companion_host_state_v1'
+    };
+
+    // Tożsamość lokalnego urządzenia
+    let myDeviceId = localStorage.getItem(STORAGE_KEYS.PLAYER_ID);
+    if (!myDeviceId) {
+      myDeviceId = 'p_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+      localStorage.setItem(STORAGE_KEYS.PLAYER_ID, myDeviceId);
+    }
+
+    // Aktualnie aktywny identyfikator gracza (umożliwia też przełączanie widoku na boty podczas testów)
+    let activePovPlayerId = myDeviceId;
+    let selectedColorHex = localStorage.getItem(STORAGE_KEYS.PLAYER_COLOR) || PLAYER_COLORS[0].hex;
+    let isAccessibilityMode = localStorage.getItem(STORAGE_KEYS.A11Y_MODE) === 'true';
+
+    // Główny stan gry (Server-Authoritative / Host-Authoritative)
+    let gameState = {
+      roomCode: '',
+      hostId: '',
+      status: 'LOBBY', // LOBBY | STORYTELLER_PREP | VOTING | CLAIMING | REVEAL | GAME_OVER
+      winMode: 'POINTS', // POINTS | ENDLESS
+      targetScore: 30,
+      fastReveal: false, // false = 2s odstępu między kartami, true = 1.35s odstępu
+      autoNextRound: false, // false = ręczne przejście, true = automatyczne po 15s
+      lastLapActive: false, // Flaga "Ostatnie okrążenie"
+      roundNumber: 1,
+      storytellerIndex: 0, // Indeks w tablicy players
+      players: [],
+      // Bieżąca runda:
+      // votes: { [voterId]: cardNumber }
+      votes: {},
+      // claims: { [playerId]: cardNumber }
+      claims: {},
+      // Obliczone wyniki ostatniej rundy do animacji odsłaniania
+      lastRoundReveal: null
+    };
+
+    // Warstwa komunikacji (Socket.io + PeerJS WebRTC + BroadcastChannel dla kart przeglądarki)
+    let socket = null;
+    let peer = null;
+    let peerConnections = {}; // Dla Hosta: { peerId: DataConnection }
+    let hostConnection = null; // Dla Klienta P2P
+    let localChannel = null;
+    let revealTimeouts = [];
+    let autoNextRoundInterval = null;
+    let autoNextRoundSecondsLeft = 15;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+
+      // Wczytaj zapisany tryb dostępności (dla słabowidzących)
+      if (isAccessibilityMode) {
+        document.body.classList.add('a11y-mode');
+        document.getElementById('a11yBtnLabel').textContent = 'Duży UI: WŁ';
+      }
+
+      // Wczytaj zapisany nick z localStorage
+      const savedName = localStorage.getItem(STORAGE_KEYS.PLAYER_NAME) || '';
+      document.getElementById('inputPlayerName').value = savedName;
+
+      // Sprawdź czy w adresie URL jest kod pokoju (ze zeskanowanego kodu QR)
+      const urlParams = new URLSearchParams(window.location.search);
+      const roomFromUrl = urlParams.get('room');
+      if (roomFromUrl) {
+        document.getElementById('inputRoomCode').value = roomFromUrl.toUpperCase();
+      } else {
+        const savedRoom = localStorage.getItem(STORAGE_KEYS.ROOM_CODE);
+        if (savedRoom) {
+          document.getElementById('inputRoomCode').value = savedRoom;
+        }
+      }
+
+      initLocalBroadcastChannel();
+      tryConnectSocketServer();
+      checkAutoRestoreHostSession();
+      initMagnifierPanGesture();
+    });
+
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      const colors = {
+        info: 'bg-slate-900/95 border-amber-400 text-white',
+        success: 'bg-emerald-950/95 border-emerald-400 text-emerald-100',
+        error: 'bg-rose-950/95 border-rose-400 text-rose-100'
+      };
+      toast.className = `px-4 py-3 rounded-2xl border-2 shadow-2xl font-bold text-sm flex items-center justify-between gap-2 animate-float-up pointer-events-auto ${colors[type] || colors.info}`;
+      toast.innerHTML = `<span>${message}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 3400);
+    }
+
+    function initLocalBroadcastChannel() {
+      if ('BroadcastChannel' in window) {
+        localChannel = new BroadcastChannel('dixit_companion_local_sync');
+        localChannel.onmessage = (event) => {
+          const data = event.data;
+          if (!data) return;
+          if (data.type === 'STATE_UPDATE' && data.state.roomCode === gameState.roomCode) {
+            gameState = data.state;
+            renderAllViews();
+          } else if (data.type === 'PLAYER_ACTION' && isMeHost() && data.roomCode === gameState.roomCode) {
+            processIncomingActionOnHost(data.action);
+          }
+        };
+      }
+    }
+
+    // Próba połączenia z lokalnym serwerem Node.js (jeśli uruchomiono server.js)
+    function tryConnectSocketServer() {
+      if (typeof io === 'undefined') return;
+      try {
+        // Łączy się tylko jeśli strona została zaserwowana z serwera z uruchomionym Socket.io
+        socket = io({ reconnectionAttempts: 2, timeout: 2000, autoConnect: false });
+        socket.on('connect', () => {
+          document.getElementById('headerRoomBadge').textContent = 'Serwer Node.js aktywny';
+        });
+        socket.on('stateUpdate', (serverState) => {
+          gameState = serverState;
+          saveHostBackupState();
+          renderAllViews();
+        });
+      } catch (err) {
+        socket = null;
+      }
+    }
+
+    // Automatyczne przywracanie gry z localStorage po przypadkowym odświeżeniu / zamknięciu karty
+    function checkAutoRestoreHostSession() {
+      const savedStateRaw = localStorage.getItem(STORAGE_KEYS.HOST_SAVED_STATE);
+      if (!savedStateRaw) return;
+      try {
+        const saved = JSON.parse(savedStateRaw);
+        const urlRoom = new URLSearchParams(window.location.search).get('room');
+        // Jeśli jesteśmy w tym samym pokoju i mieliśmy już aktywną sesję
+        if (saved && saved.roomCode && (!urlRoom || urlRoom.toUpperCase() === saved.roomCode)) {
+          const meInGame = saved.players.find((p) => p.id === myDeviceId);
+          if (meInGame) {
+            gameState = saved;
+            activePovPlayerId = myDeviceId;
+            if (gameState.hostId === myDeviceId) {
+              initPeerJsHost(gameState.roomCode);
+            } else {
+              initPeerJsClient(gameState.roomCode);
+            }
+            renderAllViews();
+            showToast(`Przywrócono sesję gracza ${meInGame.name} (${meInGame.score} pkt)`, 'success');
+          }
+        }
+      } catch (e) {
+        console.warn('Nie udało się odczytać zapisanej sesji:', e);
+      }
+    }
+
+    function saveHostBackupState() {
+      if (gameState && gameState.roomCode) {
+        localStorage.setItem(STORAGE_KEYS.HOST_SAVED_STATE, JSON.stringify(gameState));
+      }
+    }
+
+    function getPeerIdForRoom(roomCode) {
+      return 'dixit-pl-room-' + roomCode.toLowerCase().replace(/[^a-z0-9]/g, '');
+    }
+
+    function initPeerJsHost(roomCode) {
+      if (typeof Peer === 'undefined') return;
+      try {
+        if (peer) peer.destroy();
+        peer = new Peer(getPeerIdForRoom(roomCode));
+        peer.on('open', () => {
+          document.getElementById('headerRoomBadge').textContent = `Stół: ${roomCode} (Host Online)`;
+        });
+        peer.on('connection', (conn) => {
+          conn.on('open', () => {
+            peerConnections[conn.peer] = conn;
+            conn.send({ type: 'STATE_UPDATE', state: gameState });
+          });
+          conn.on('data', (data) => {
+            if (data && data.type === 'PLAYER_ACTION') {
+              processIncomingActionOnHost(data.action);
+            }
+          });
+          conn.on('close', () => {
+            delete peerConnections[conn.peer];
+          });
+        });
+      } catch (e) {
+        console.warn('PeerJS Host warning:', e);
+      }
+    }
+
+    function initPeerJsClient(roomCode) {
+      if (typeof Peer === 'undefined') return;
+      try {
+        if (peer) peer.destroy();
+        peer = new Peer();
+        peer.on('open', () => {
+          hostConnection = peer.connect(getPeerIdForRoom(roomCode), { reliable: true });
+          hostConnection.on('open', () => {
+            document.getElementById('headerRoomBadge').textContent = `Połączono ze stołem ${roomCode}`;
+            // Wyślij żądanie dołączenia / przywrócenia gracza
+            const name = localStorage.getItem(STORAGE_KEYS.PLAYER_NAME) || 'Gracz';
+            sendActionToHost({
+              type: 'JOIN_OR_RECONNECT',
+              player: {
+                id: myDeviceId,
+                name: name,
+                color: selectedColorHex
+              }
+            });
+          });
+          hostConnection.on('data', (data) => {
+            if (data && data.type === 'STATE_UPDATE') {
+              gameState = data.state;
+              saveHostBackupState();
+              renderAllViews();
+            }
+          });
+        });
+      } catch (e) {
+        console.warn('PeerJS Client warning:', e);
+      }
+    }
+
+    function isMeHost() {
+      return gameState.hostId === myDeviceId;
+    }
+
+    // Rozsyłanie zaktualizowanego stanu gry do wszystkich podłączonych telefonów
+    function broadcastStateFromHost() {
+      saveHostBackupState();
+      if (localChannel) {
+        localChannel.postMessage({ type: 'STATE_UPDATE', state: gameState });
+      }
+      Object.values(peerConnections).forEach((conn) => {
+        if (conn && conn.open) {
+          conn.send({ type: 'STATE_UPDATE', state: gameState });
+        }
+      });
+      renderAllViews();
+    }
+
+    // Wysyłanie akcji z telefonu gracza do Hosta
+    function sendActionToHost(actionPayload) {
+      if (isMeHost()) {
+        processIncomingActionOnHost(actionPayload);
+      } else {
+        if (hostConnection && hostConnection.open) {
+          hostConnection.send({ type: 'PLAYER_ACTION', action: actionPayload });
+        }
+        if (localChannel) {
+          localChannel.postMessage({
+            type: 'PLAYER_ACTION',
+            roomCode: gameState.roomCode,
+            action: actionPayload
+          });
+        }
+      }
+    }
+
+    function handleCreateOrJoinRoom(asHost) {
+      const nameInput = document.getElementById('inputPlayerName').value.trim();
+      if (!nameInput) {
+        showToast('Wpisz swój nick przed wejściem do gry!', 'error');
+        document.getElementById('inputPlayerName').focus();
+        return;
+      }
+
+      localStorage.setItem(STORAGE_KEYS.PLAYER_NAME, nameInput);
+      localStorage.setItem(STORAGE_KEYS.PLAYER_COLOR, selectedColorHex);
+
+      let roomInput = document.getElementById('inputRoomCode').value.trim().toUpperCase();
+      if (asHost) {
+        if (!roomInput) {
+          roomInput = 'DX' + Math.floor(1000 + Math.random() * 9000);
+        }
+        localStorage.setItem(STORAGE_KEYS.ROOM_CODE, roomInput);
+
+        const initialHostColor = PLAYER_COLORS.some(
+          (c) => c.hex.toLowerCase() === String(selectedColorHex).toLowerCase()
+        )
+          ? selectedColorHex
+          : PLAYER_COLORS[0].hex;
+
+        gameState = {
+          roomCode: roomInput,
+          hostId: myDeviceId,
+          status: 'LOBBY',
+          winMode: 'POINTS',
+          targetScore: 30,
+          fastReveal: false,
+          autoNextRound: false,
+          lastLapActive: false,
+          roundNumber: 1,
+          storytellerIndex: 0,
+          players: [
+            {
+              id: myDeviceId,
+              name: nameInput,
+              color: initialHostColor,
+              score: 0,
+              active: true,
+              isBot: false
+            }
+          ],
+          votes: {},
+          claims: {},
+          lastRoundReveal: null
+        };
+
+        activePovPlayerId = myDeviceId;
+        initPeerJsHost(roomInput);
+        broadcastStateFromHost();
+        showToast(`Utworzono stół ${roomInput}! Pokaż kod QR znajomym.`, 'success');
+      } else {
+        if (!roomInput) {
+          showToast('Wpisz Kod Stołu z ekranu Hosta lub zeskanuj kod QR!', 'error');
+          document.getElementById('inputRoomCode').focus();
+          return;
+        }
+        localStorage.setItem(STORAGE_KEYS.ROOM_CODE, roomInput);
+        gameState.roomCode = roomInput;
+
+        // Sprawdź czy ten sam pokój jest otwarty w innej karcie tej samej przeglądarki
+        initPeerJsClient(roomInput);
+        sendActionToHost({
+          type: 'JOIN_OR_RECONNECT',
+          player: {
+            id: myDeviceId,
+            name: nameInput,
+            color: selectedColorHex
+          }
+        });
+        showToast(`Łączenie ze stołem ${roomInput}...`, 'info');
+      }
+    }
+
+    // Centralny procesor wszystkich akcji graczy po stronie Hosta
+    function processIncomingActionOnHost(action) {
+      if (!action || !action.type) return;
+
+      switch (action.type) {
+        case 'JOIN_OR_RECONNECT': {
+          const p = action.player;
+          const existing = gameState.players.find((x) => x.id === p.id);
+          if (existing) {
+            // Gracz wraca po odświeżeniu / zamknięciu karty – zachowuje punkty i swój unikalny kolor
+            existing.name = p.name || existing.name;
+            existing.color = getFirstFreeColor(existing.color, existing.id);
+            existing.active = true;
+          } else {
+            // Sprawdź czy ktoś o dokładnie tym samym nicku już jest (awaryjne przejęcie sesji)
+            const sameName = gameState.players.find(
+              (x) => x.name.toLowerCase() === p.name.toLowerCase() && !x.isBot
+            );
+            if (sameName) {
+              // Aktualizacja ID urządzenia dla gracza, któremu np. padł telefon
+              const oldId = sameName.id;
+              sameName.id = p.id;
+              sameName.color = getFirstFreeColor(sameName.color, p.id);
+              if (gameState.votes[oldId] !== undefined) {
+                gameState.votes[p.id] = gameState.votes[oldId];
+                delete gameState.votes[oldId];
+              }
+              if (gameState.claims[oldId] !== undefined) {
+                gameState.claims[p.id] = gameState.claims[oldId];
+                delete gameState.claims[oldId];
+              }
+            } else {
+              const assignedColor = getFirstFreeColor(p.color, p.id);
+              gameState.players.push({
+                id: p.id,
+                name: p.name,
+                color: assignedColor,
+                score: 0,
+                active: true,
+                isBot: false
+              });
+            }
+          }
+          broadcastStateFromHost();
+          break;
+        }
+
+        case 'CHANGE_PLAYER_COLOR': {
+          if (gameState.status !== 'LOBBY') return;
+          const { requesterId, targetPlayerId } = action;
+          // Każdy gracz może zmienić tylko swój kolor, a Host może zmienić wszystkim
+          const canChange = requesterId === gameState.hostId || requesterId === targetPlayerId;
+          if (!canChange) return;
+
+          const targetPlayer = gameState.players.find((x) => x.id === targetPlayerId);
+          if (!targetPlayer) return;
+
+          targetPlayer.color = getNextFreeColor(targetPlayer.color, targetPlayer.id);
+          broadcastStateFromHost();
+          break;
+        }
+
+        case 'STORYTELLER_CARDS_READY': {
+          if (gameState.status === 'STORYTELLER_PREP') {
+            gameState.status = 'VOTING';
+            gameState.votes = {};
+            gameState.claims = {};
+            // Jeśli w grze są boty testowe, niech automatycznie oddadzą głos
+            triggerBotVotesIfNeeded();
+            broadcastStateFromHost();
+          }
+          break;
+        }
+
+        case 'CAST_VOTE': {
+          if (gameState.status !== 'VOTING') return;
+          const { voterId, cardNumber } = action;
+          const storyteller = getCurrentStoryteller();
+          if (storyteller && storyteller.id === voterId) return; // Bajarz nie głosuje
+
+          gameState.votes[voterId] = Number(cardNumber);
+
+          // Sprawdź czy wszyscy aktywni gracze (poza Bajarzem) już zagłosowali
+          const eligibleVoters = getActivePlayers().filter((pl) => pl.id !== storyteller.id);
+          const allVoted = eligibleVoters.every((pl) => gameState.votes[pl.id] !== undefined);
+
+          if (allVoted && eligibleVoters.length > 0) {
+            gameState.status = 'CLAIMING';
+            triggerBotClaimsIfNeeded();
+          }
+          broadcastStateFromHost();
+          break;
+        }
+
+        case 'CLAIM_OWN_CARD': {
+          if (gameState.status !== 'CLAIMING') return;
+          const { playerId, cardNumber } = action;
+          gameState.claims[playerId] = Number(cardNumber);
+
+          // Sprawdź czy wszyscy aktywni gracze (w tym Bajarz) wskazali swoją kartę
+          const activePlayers = getActivePlayers();
+          const allClaimed = activePlayers.every((pl) => gameState.claims[pl.id] !== undefined);
+
+          if (allClaimed) {
+            // Sprawdź czy nie ma konfliktu (np. 2 graczy kliknęło kartę nr 3)
+            const conflicts = getClaimConflicts();
+            if (conflicts.length === 0) {
+              // Brak konfliktów – wyliczamy punkty i przechodzimy do animowanego odsłaniania!
+              calculateRoundScoresAndTransition();
+            }
+          }
+          broadcastStateFromHost();
+          break;
+        }
+
+        case 'NEXT_ROUND': {
+          if (gameState.status === 'REVEAL') {
+            proceedToNextRoundOnHost();
+          }
+          break;
+        }
+      }
+    }
+
+    function getActivePlayers() {
+      return gameState.players.filter((p) => p.active !== false);
+    }
+
+    function getCurrentStoryteller() {
+      const active = getActivePlayers();
+      if (active.length === 0) return null;
+      const idx = gameState.storytellerIndex % active.length;
+      return active[idx];
+    }
+
+    // Wykrywanie czy dwóch lub więcej graczy oznaczyło ten sam numer karty jako swoją
+    function getClaimConflicts() {
+      const activePlayers = getActivePlayers();
+      const cardToPlayersMap = {};
+      activePlayers.forEach((p) => {
+        const claimedCard = gameState.claims[p.id];
+        if (claimedCard !== undefined) {
+          if (!cardToPlayersMap[claimedCard]) cardToPlayersMap[claimedCard] = [];
+          cardToPlayersMap[claimedCard].push(p);
+        }
+      });
+
+      const conflicts = [];
+      Object.entries(cardToPlayersMap).forEach(([cardNum, owners]) => {
+        if (owners.length > 1) {
+          conflicts.push({
+            cardNumber: Number(cardNum),
+            players: owners
+          });
+        }
+      });
+      return conflicts;
+    }
+
+    // Główny algorytm liczenia punktów (zgodnie z ustaleniami: brak limitu za zmyłki, +2 pkt i zmyłki gdy nikt nie zgadnie)
+    function calculateRoundScoresAndTransition() {
+      const activePlayers = getActivePlayers();
+      const storyteller = getCurrentStoryteller();
+      if (!storyteller) return;
+
+      const storytellerCardNum = gameState.claims[storyteller.id];
+      const nonStorytellers = activePlayers.filter((p) => p.id !== storyteller.id);
+
+      // Mapowanie numeru karty -> właściciel
+      const cardOwnerMap = {};
+      activePlayers.forEach((p) => {
+        const cNum = gameState.claims[p.id];
+        if (cNum !== undefined) {
+          cardOwnerMap[cNum] = p;
+        }
+      });
+
+      // Lista graczy, którzy trafili kartę Bajarza
+      const correctVoters = nonStorytellers.filter(
+        (p) => gameState.votes[p.id] === storytellerCardNum
+      );
+
+      const nobodyGuessed = correctVoters.length === 0;
+      const everybodyGuessed = correctVoters.length === nonStorytellers.length && nonStorytellers.length > 0;
+
+      // Punkty zdobyte w tej rundzie przez każdego gracza
+      const roundPoints = {};
+      const roundReasons = {};
+      activePlayers.forEach((p) => {
+        roundPoints[p.id] = 0;
+        roundReasons[p.id] = [];
+      });
+
+      // 1. Punkty główne (Bajarz vs reszta)
+      if (nobodyGuessed || everybodyGuessed) {
+        // Bajarz dostaje 0 pkt, wszyscy pozostali po +2 pkt
+        roundPoints[storyteller.id] += 0;
+        roundReasons[storyteller.id].push(
+          nobodyGuessed ? 'Nikt nie trafił (0 pkt)' : 'Wszyscy trafili (0 pkt)'
+        );
+        nonStorytellers.forEach((p) => {
+          roundPoints[p.id] += 2;
+          roundReasons[p.id].push(
+            nobodyGuessed ? '+2 pkt (nikt nie zgadł Bajarza)' : '+2 pkt (wszyscy zgadli Bajarza)'
+          );
+        });
+      } else {
+        // Przynajmniej jedna osoba zgadła (ale nie wszyscy): Bajarz +3 pkt, trafiający +3 pkt
+        roundPoints[storyteller.id] += 3;
+        roundReasons[storyteller.id].push(
+          `+3 pkt (trafiono kartę Bajarza: ${correctVoters.length})`
+        );
+        correctVoters.forEach((p) => {
+          roundPoints[p.id] += 3;
+          roundReasons[p.id].push('+3 pkt (trafiona karta Bajarza)');
+        });
+      }
+
+      // 2. Punkty za zmyłki (+1 pkt za każdy głos na Twoją kartę, zgrupowane w jeden wpis)
+      const bluffVotersByOwner = {};
+      activePlayers.forEach((p) => {
+        bluffVotersByOwner[p.id] = [];
+      });
+
+      nonStorytellers.forEach((voter) => {
+        const votedCardNum = gameState.votes[voter.id];
+        const cardOwner = cardOwnerMap[votedCardNum];
+        if (!cardOwner) return;
+
+        if (cardOwner.id !== storyteller.id && cardOwner.id !== voter.id) {
+          roundPoints[cardOwner.id] += 1;
+          bluffVotersByOwner[cardOwner.id].push(voter.name);
+        } else if (cardOwner.id === voter.id) {
+          roundReasons[voter.id].push('Głos na własną kartę (0 pkt)');
+        }
+      });
+
+      activePlayers.forEach((p) => {
+        const fooledNames = bluffVotersByOwner[p.id];
+        if (fooledNames && fooledNames.length > 0) {
+          roundReasons[p.id].push(
+            `+${fooledNames.length} pkt zmyłka (${fooledNames.join(', ')})`
+          );
+        }
+      });
+
+      // Budujemy dane dla wszystkich kart 1 .. N w kolejności stołowej
+      const cardsByNumber = [];
+      for (let cNum = 1; cNum <= activePlayers.length; cNum++) {
+        const owner = cardOwnerMap[cNum];
+        const votersForThisCard = nonStorytellers.filter((v) => gameState.votes[v.id] === cNum);
+        const isStorytellerCard = Boolean(owner && owner.id === storyteller.id);
+
+        // Ile punktów za zmyłki przyniosła ta konkretna karta
+        const validBluffVotes = votersForThisCard.filter((v) => !owner || v.id !== owner.id);
+
+        cardsByNumber.push({
+          cardNumber: cNum,
+          ownerId: owner ? owner.id : null,
+          ownerName: owner ? owner.name : 'Nieznany',
+          ownerColor: owner ? owner.color : '#94a3b8',
+          isStorytellerCard,
+          voters: votersForThisCard.map((v) => ({
+            id: v.id,
+            name: v.name,
+            color: v.color,
+            isSelfVote: Boolean(owner && v.id === owner.id)
+          })),
+          bluffPointsEarned: isStorytellerCard ? 0 : validBluffVotes.length
+        });
+      }
+
+      // Choreografia odsłaniania kart:
+      // Krok 1: Równocześnie wszystkie karty zwykłych graczy, na które NIKT nie zagłosował (0 głosów)
+      // Krok 2: Po kolei karty zwykłych graczy z głosami (rosnąco wg liczby głosów)
+      // Krok 3: Na sam koniec Karta Bajarza!
+      const revealSteps = [];
+
+      const zeroVoteCards = cardsByNumber
+        .filter((c) => !c.isStorytellerCard && c.voters.length === 0)
+        .map((c) => c.cardNumber);
+
+      if (zeroVoteCards.length > 0) {
+        revealSteps.push({
+          type: 'ZERO_VOTES',
+          label: 'Odsłaniamy karty bez głosów...',
+          cardNumbers: zeroVoteCards
+        });
+      }
+
+      const votedNonStorytellerCards = cardsByNumber
+        .filter((c) => !c.isStorytellerCard && c.voters.length > 0)
+        .sort((a, b) => a.voters.length - b.voters.length || a.cardNumber - b.cardNumber);
+
+      votedNonStorytellerCards.forEach((c) => {
+        revealSteps.push({
+          type: 'BLUFF_CARD',
+          label: `Karta nr ${c.cardNumber} (${c.voters.length} ${c.voters.length === 1 ? 'głos' : 'głosy'})...`,
+          cardNumbers: [c.cardNumber]
+        });
+      });
+
+      const storytellerCardObj = cardsByNumber.find((c) => c.isStorytellerCard);
+      if (storytellerCardObj) {
+        revealSteps.push({
+          type: 'STORYTELLER_CARD',
+          label: 'Finał: Karta Bajarza!',
+          cardNumbers: [storytellerCardObj.cardNumber]
+        });
+      }
+
+      // Dolicz punkty do głównej tabeli graczy
+      activePlayers.forEach((p) => {
+        p.score += roundPoints[p.id] || 0;
+      });
+
+      gameState.lastRoundReveal = {
+        storytellerId: storyteller.id,
+        storytellerName: storyteller.name,
+        storytellerCardNum,
+        nobodyGuessed,
+        everybodyGuessed,
+        correctVotersCount: correctVoters.length,
+        cardsByNumber,
+        revealSteps,
+        roundPoints,
+        roundReasons
+      };
+
+      gameState.status = 'REVEAL';
+    }
+
+    function clearAutoNextRoundTimer() {
+      if (autoNextRoundInterval) {
+        clearInterval(autoNextRoundInterval);
+        autoNextRoundInterval = null;
+      }
+    }
+
+    function proceedToNextRoundOnHost() {
+      clearAutoNextRoundTimer();
+      const activePlayers = getActivePlayers();
+      if (activePlayers.length === 0) return;
+
+      const nextStorytellerIdx = (gameState.storytellerIndex + 1) % activePlayers.length;
+      const completedFullCircle = nextStorytellerIdx === 0;
+
+      // Sprawdź czy gra powinna się zakończyć:
+      // 1. W trybie na punkty: ktoś osiągnął lub przekroczył targetScore
+      const highestScore = Math.max(...gameState.players.map((p) => p.score));
+      const reachedPointGoal =
+        gameState.winMode === 'POINTS' && highestScore >= gameState.targetScore;
+
+      // 2. W trybie "Ostatnie okrążenie" (Endless lub wymuszonym przez Hosta): gdy domknęło się pełne koło Bajarzy
+      const finishedLastLap = gameState.lastLapActive && completedFullCircle;
+
+      if (reachedPointGoal || finishedLastLap) {
+        gameState.status = 'GAME_OVER';
+      } else {
+        gameState.storytellerIndex = nextStorytellerIdx;
+        gameState.roundNumber += 1;
+        gameState.status = 'STORYTELLER_PREP';
+        gameState.votes = {};
+        gameState.claims = {};
+        gameState.lastRoundReveal = null;
+
+        // Jeśli nowy Bajarz to bot testowy, automatycznie wyłóż karty po 1 sekundzie
+        const newStoryteller = getCurrentStoryteller();
+        if (newStoryteller && newStoryteller.isBot) {
+          setTimeout(() => {
+            if (gameState.status === 'STORYTELLER_PREP') {
+              processIncomingActionOnHost({ type: 'STORYTELLER_CARDS_READY' });
+            }
+          }, 900);
+        }
+      }
+
+      broadcastStateFromHost();
+    }
+
+    const BOT_NAMES = ['Marek', 'Kasia', 'Tomek', 'Ania', 'Piotrek', 'Magda', 'Kuba', 'Zosia', 'Michał'];
+
+    function addSimulatedPlayer() {
+      if (!isMeHost()) {
+        showToast('Tylko Host może dodawać graczy testowych.', 'error');
+        return;
+      }
+      if (gameState.players.length >= PLAYER_COLORS.length) {
+        showToast(`Maksymalna liczba graczy przy stole to ${PLAYER_COLORS.length}.`, 'error');
+        return;
+      }
+      const usedNames = new Set(gameState.players.map((p) => p.name));
+      const availableName = BOT_NAMES.find((n) => !usedNames.has(n)) || `Gracz ${gameState.players.length + 1}`;
+      const freeColorHex = getFirstFreeColor();
+
+      gameState.players.push({
+        id: 'bot_' + Math.random().toString(36).substring(2, 7),
+        name: availableName,
+        color: freeColorHex,
+        score: 0,
+        active: true,
+        isBot: true
+      });
+
+      broadcastStateFromHost();
+      showToast(`Dodano gracza ${availableName}`, 'success');
+    }
+
+    function triggerBotVotesIfNeeded() {
+      if (!isMeHost()) return;
+      const activePlayers = getActivePlayers();
+      const storyteller = getCurrentStoryteller();
+      const totalCards = activePlayers.length;
+
+      activePlayers.forEach((p) => {
+        if (p.isBot && p.id !== storyteller.id && gameState.votes[p.id] === undefined) {
+          const randomCard = Math.floor(1 + Math.random() * totalCards);
+          gameState.votes[p.id] = randomCard;
+        }
+      });
+    }
+
+    function triggerBotClaimsIfNeeded() {
+      if (!isMeHost()) return;
+      const activePlayers = getActivePlayers();
+      const usedCards = new Set(Object.values(gameState.claims));
+
+      // Przypisz botom wolne numery kart, żeby łatwo testować grę
+      let candidateCard = 1;
+      activePlayers.forEach((p) => {
+        if (p.isBot && gameState.claims[p.id] === undefined) {
+          while (usedCards.has(candidateCard) && candidateCard <= activePlayers.length) {
+            candidateCard++;
+          }
+          if (candidateCard <= activePlayers.length) {
+            gameState.claims[p.id] = candidateCard;
+            usedCards.add(candidateCard);
+          }
+        }
+      });
+    }
+
+    let lastRenderedQrUrl = '';
+
+    function renderLobbyView() {
+      document.getElementById('lobbyRoomCodeDisplay').textContent = gameState.roomCode || '----';
+      document.getElementById('lobbyPlayerCount').textContent = gameState.players.length;
+
+      // Generuj kod QR z bezpośrednim linkiem do pokoju
+      const joinUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(gameState.roomCode)}`;
+      if (joinUrl !== lastRenderedQrUrl) {
+        lastRenderedQrUrl = joinUrl;
+        const qrContainer = document.getElementById('qrcodeContainer');
+        qrContainer.innerHTML = '';
+        if (typeof QRCode !== 'undefined') {
+          new QRCode(qrContainer, {
+            text: joinUrl,
+            width: 136,
+            height: 136,
+            colorDark: '#0f172a',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M
+          });
+        }
+      }
+
+      // Renderowanie listy graczy z przyciskami ▲ i ▼ dla Hosta
+      const listEl = document.getElementById('lobbyPlayerList');
+      listEl.innerHTML = '';
+
+      gameState.players.forEach((player, index) => {
+        const row = document.createElement('div');
+        row.className =
+          'flex items-center justify-between gap-2 p-3 rounded-2xl bg-slate-950/90 border border-slate-800';
+
+        const isHostPlayer = player.id === gameState.hostId;
+        const isMe = player.id === myDeviceId;
+        const canChangeColor = isMeHost() || isMe;
+        const textColor = getTextColorForHex(player.color);
+        const colorName = getColorNameForHex(player.color);
+
+        const avatarCircleHtml = canChangeColor
+          ? `<button
+              type="button"
+              onclick="cyclePlayerColor('${player.id}')"
+              class="w-9 h-9 rounded-full shrink-0 flex items-center justify-center font-black text-xs shadow-md border-2 border-white/40 hover:scale-110 active:scale-95 transition cursor-pointer"
+              style="background-color: ${player.color}; color: ${textColor};"
+              title="Kliknij, aby zmienić kolor (${colorName})"
+            >
+              ${escapeHtml(player.name.substring(0, 2).toUpperCase())}
+            </button>`
+          : `<div
+              class="w-9 h-9 rounded-full shrink-0 flex items-center justify-center font-black text-xs shadow border border-white/20"
+              style="background-color: ${player.color}; color: ${textColor};"
+              title="Kolor: ${colorName}"
+            >
+              ${escapeHtml(player.name.substring(0, 2).toUpperCase())}
+            </div>`;
+
+        row.innerHTML = `
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-7 h-7 rounded-xl bg-slate-800 text-slate-300 font-mono font-bold text-xs flex items-center justify-center shrink-0">
+              #${index + 1}
+            </div>
+            ${avatarCircleHtml}
+            <div class="truncate">
+              <div class="font-extrabold text-white text-sm sm:text-base flex items-center gap-1.5">
+                <span class="truncate">${escapeHtml(player.name)}</span>
+                ${isHostPlayer ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30">Host</span>' : ''}
+                ${isMe ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">Ty</span>' : ''}
+                ${player.isBot ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">Bot</span>' : ''}
+              </div>
+              <div class="text-[11px] text-slate-400">
+                Kolejność: ${index + 1} • Kolor: <strong class="text-slate-200">${colorName}</strong>
+              </div>
+            </div>
+          </div>
+
+          ${
+            isMeHost()
+              ? `<div class="flex items-center gap-1 shrink-0">
+                  <button onclick="movePlayerInLobby(${index}, -1)" ${index === 0 ? 'disabled' : ''} class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-30 text-slate-200 font-bold text-xs" title="Przesuń wyżej">▲</button>
+                  <button onclick="movePlayerInLobby(${index}, 1)" ${index === gameState.players.length - 1 ? 'disabled' : ''} class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-30 text-slate-200 font-bold text-xs" title="Przesuń niżej">▼</button>
+                  ${
+                    !isHostPlayer
+                      ? `<button onclick="removePlayerFromLobby('${player.id}')" class="p-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 text-xs font-bold ml-1" title="Usuń gracza">✕</button>`
+                      : ''
+                  }
+                </div>`
+              : ''
+          }
+        `;
+        listEl.appendChild(row);
+      });
+
+      // Podświetlenie wybranego trybu punktowego
+      const modes = [
+        { id: 'modeBtn30', mode: 'POINTS', val: 30 },
+        { id: 'modeBtn45', mode: 'POINTS', val: 45 },
+        { id: 'modeBtn60', mode: 'POINTS', val: 60 },
+        { id: 'modeBtnEndless', mode: 'ENDLESS', val: 0 }
+      ];
+      modes.forEach((m) => {
+        const btn = document.getElementById(m.id);
+        if (!btn) return;
+        const active =
+          gameState.winMode === m.mode &&
+          (m.mode === 'ENDLESS' || gameState.targetScore === m.val);
+        btn.className = active
+          ? 'py-3 px-3 rounded-2xl border-2 border-amber-400 bg-amber-500/20 text-white font-extrabold text-sm transition'
+          : 'py-3 px-3 rounded-2xl border border-slate-700 bg-slate-950/60 text-slate-300 font-bold text-sm transition';
+      });
+
+      const fastRevealCheckbox = document.getElementById('checkboxFastRevealLobby');
+      if (fastRevealCheckbox) {
+        fastRevealCheckbox.checked = Boolean(gameState.fastReveal);
+        fastRevealCheckbox.disabled = !isMeHost();
+      }
+
+      const autoNextCheckbox = document.getElementById('checkboxAutoNextLobby');
+      if (autoNextCheckbox) {
+        autoNextCheckbox.checked = Boolean(gameState.autoNextRound);
+        autoNextCheckbox.disabled = !isMeHost();
+      }
+
+      document.getElementById('hostStartContainer').classList.toggle('hidden', !isMeHost());
+      document.getElementById('guestWaitLobbyMsg').classList.toggle('hidden', isMeHost());
+      document.getElementById('btnAddBot').classList.toggle('hidden', !isMeHost());
+    }
+
+    function toggleFastRevealSetting(checked) {
+      if (!isMeHost()) {
+        showToast('Tylko Host może zmieniać ustawienia stołu.', 'info');
+        return;
+      }
+      gameState.fastReveal = Boolean(checked);
+      const modalCb = document.getElementById('checkboxFastRevealModal');
+      if (modalCb) modalCb.checked = gameState.fastReveal;
+      broadcastStateFromHost();
+    }
+
+    function toggleAutoNextRoundSetting(checked) {
+      if (!isMeHost()) {
+        showToast('Tylko Host może zmieniać ustawienia stołu.', 'info');
+        return;
+      }
+      gameState.autoNextRound = Boolean(checked);
+      const modalCb = document.getElementById('checkboxAutoNextModal');
+      if (modalCb) modalCb.checked = gameState.autoNextRound;
+
+      // Jeśli jesteśmy już na ekranie podsumowania rundy, od razu włącz lub zatrzymaj odliczanie
+      const summaryCard = document.getElementById('revealScoreSummaryCard');
+      const isSummaryVisible = summaryCard && !summaryCard.classList.contains('hidden');
+      if (gameState.status === 'REVEAL' && isSummaryVisible) {
+        if (gameState.autoNextRound) {
+          startAutoNextRoundCountdown();
+        } else {
+          clearAutoNextRoundTimer();
+          updateAutoNextRoundLabels();
+        }
+      }
+
+      broadcastStateFromHost();
+    }
+
+    function cyclePlayerColor(targetPlayerId) {
+      const canChange = isMeHost() || targetPlayerId === myDeviceId;
+      if (!canChange) {
+        showToast('Możesz zmienić tylko własny kolor.', 'info');
+        return;
+      }
+      sendActionToHost({
+        type: 'CHANGE_PLAYER_COLOR',
+        requesterId: myDeviceId,
+        targetPlayerId: targetPlayerId
+      });
+    }
+
+    function movePlayerInLobby(index, direction) {
+      if (!isMeHost()) return;
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= gameState.players.length) return;
+      const temp = gameState.players[index];
+      gameState.players[index] = gameState.players[targetIndex];
+      gameState.players[targetIndex] = temp;
+      broadcastStateFromHost();
+    }
+
+    function removePlayerFromLobby(playerId) {
+      if (!isMeHost()) return;
+      gameState.players = gameState.players.filter((p) => p.id !== playerId);
+      broadcastStateFromHost();
+    }
+
+    function updateGameSettings(winMode, targetScore) {
+      if (!isMeHost()) {
+        showToast('Tylko Host może zmieniać ustawienia stołu.', 'info');
+        return;
+      }
+      gameState.winMode = winMode;
+      gameState.targetScore = targetScore;
+      broadcastStateFromHost();
+    }
+
+    function startGame() {
+      if (!isMeHost()) return;
+      if (gameState.players.length < 3) {
+        showToast('Dodaj przynajmniej 3 graczy (możesz użyć przycisku „+ Dodaj gracza testowego”)!', 'error');
+        return;
+      }
+      gameState.status = 'STORYTELLER_PREP';
+      gameState.roundNumber = 1;
+      gameState.storytellerIndex = 0;
+      gameState.votes = {};
+      gameState.claims = {};
+      gameState.lastLapActive = false;
+      broadcastStateFromHost();
+    }
+
+    function renderAllViews() {
+      const inRoom = Boolean(gameState.roomCode && gameState.players.length > 0);
+
+      document.getElementById('viewWelcome').classList.toggle('hidden', inRoom);
+      document.getElementById('viewLobby').classList.toggle('hidden', !inRoom || gameState.status !== 'LOBBY');
+      document.getElementById('viewGame').classList.toggle('hidden', !inRoom || gameState.status === 'LOBBY');
+
+      // Przycisk Hosta w nagłówku
+      const hostBtn = document.getElementById('btnHostPanel');
+      if (inRoom && isMeHost()) {
+        hostBtn.classList.remove('hidden');
+        hostBtn.classList.add('flex');
+      } else {
+        hostBtn.classList.add('hidden');
+      }
+
+      // Baner ostatniego okrążenia
+      document.getElementById('lastLapBanner').classList.toggle('hidden', !gameState.lastLapActive);
+
+      if (!inRoom) return;
+
+      if (gameState.status === 'LOBBY') {
+        renderLobbyView();
+        return;
+      }
+
+      renderGameHeaderAndScoreboard();
+
+      // Ukryj wszystkie pod-fazy i pokaż aktualną
+      const phases = ['phaseStorytellerPrep', 'phaseVoting', 'phaseClaiming', 'phaseReveal', 'phaseGameOver'];
+      phases.forEach((id) => document.getElementById(id).classList.add('hidden'));
+
+      if (gameState.status === 'STORYTELLER_PREP') {
+        document.getElementById('phaseStorytellerPrep').classList.remove('hidden');
+        renderPhasePrep();
+      } else if (gameState.status === 'VOTING') {
+        document.getElementById('phaseVoting').classList.remove('hidden');
+        renderPhaseVoting();
+      } else if (gameState.status === 'CLAIMING') {
+        document.getElementById('phaseClaiming').classList.remove('hidden');
+        renderPhaseClaiming();
+      } else if (gameState.status === 'REVEAL') {
+        document.getElementById('phaseReveal').classList.remove('hidden');
+        renderPhaseReveal();
+      } else if (gameState.status === 'GAME_OVER') {
+        document.getElementById('phaseGameOver').classList.remove('hidden');
+        renderPhaseGameOver();
+      }
+
+      lucide.createIcons();
+    }
+
+    function renderGameHeaderAndScoreboard() {
+      const activePlayers = getActivePlayers();
+      const storyteller = getCurrentStoryteller();
+
+      document.getElementById('roundBadge').textContent = `Runda ${gameState.roundNumber}`;
+      document.getElementById('winConditionBadge').textContent =
+        gameState.winMode === 'ENDLESS'
+          ? 'Tryb Endless (do decyzji Hosta)'
+          : `Cel: ${gameState.targetScore} pkt`;
+
+      if (storyteller) {
+        const av = document.getElementById('storytellerAvatar');
+        av.style.backgroundColor = storyteller.color;
+        av.style.color = getTextColorForHex(storyteller.color);
+        av.textContent = storyteller.name.substring(0, 2).toUpperCase();
+        document.getElementById('storytellerNameDisplay').textContent = storyteller.name;
+      }
+
+      // Jeśli są boty testowe, pokaż przełącznik perspektywy (POV), by móc testować z każdego fotela
+      const hasBots = gameState.players.some((p) => p.isBot);
+      const povWrapper = document.getElementById('botSwitcherWrapper');
+      if (hasBots && isMeHost()) {
+        povWrapper.classList.remove('hidden');
+        povWrapper.classList.add('flex');
+        const sel = document.getElementById('selectActivePov');
+        sel.innerHTML = '';
+        activePlayers.forEach((p) => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.selected = p.id === activePovPlayerId;
+          opt.textContent = `${p.name} (${p.score} pkt)`;
+          sel.appendChild(opt);
+        });
+      } else {
+        povWrapper.classList.add('hidden');
+        activePovPlayerId = myDeviceId;
+      }
+
+      // Renderuj rozwijaną tabelę wyników
+      const drawer = document.getElementById('scoreboardDrawer');
+      const sorted = [...gameState.players].sort((a, b) => b.score - a.score);
+      drawer.innerHTML = sorted
+        .map(
+          (p, i) => `
+        <div class="flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-950/60 text-xs sm:text-sm ${!p.active ? 'opacity-50' : ''}">
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-slate-400 font-bold w-4">${i + 1}.</span>
+            <span class="w-3 h-3 rounded-full inline-block" style="background:${p.color}"></span>
+            <span class="font-bold text-white">${escapeHtml(p.name)}</span>
+            ${!p.active ? '<span class="text-[10px] text-rose-400">(Pauza)</span>' : ''}
+          </div>
+          <span class="font-extrabold text-amber-300">${p.score} pkt</span>
+        </div>
+      `
+        )
+        .join('');
+    }
+
+    function switchLocalPov(playerId) {
+      activePovPlayerId = playerId;
+      renderAllViews();
+    }
+
+    function toggleScoreboardDrawer() {
+      const dr = document.getElementById('scoreboardDrawer');
+      dr.classList.toggle('hidden');
+    }
+
+    // Faza 1: Przygotowanie Bajarza
+    function renderPhasePrep() {
+      const activePlayers = getActivePlayers();
+      const storyteller = getCurrentStoryteller();
+      const isMeStoryteller = storyteller && storyteller.id === activePovPlayerId;
+
+      document.getElementById('prepStorytellerView').classList.toggle('hidden', !isMeStoryteller);
+      document.getElementById('prepWaitingView').classList.toggle('hidden', isMeStoryteller);
+
+      document.getElementById('prepTotalCardsCount').textContent = activePlayers.length;
+      document.getElementById('prepMaxCardNum').textContent = activePlayers.length;
+      document.getElementById('prepStorytellerName').textContent = storyteller ? storyteller.name : '';
+    }
+
+    function storytellerConfirmCardsLaid() {
+      sendActionToHost({ type: 'STORYTELLER_CARDS_READY' });
+    }
+
+    // Funkcja zwracająca klasy siatki tak, aby do 6 kart leżało obok siebie w jednej linii poziomej,
+    // a przy 7-12 kartach przechodziły estetycznie do drugiego poziomego rzędu
+    function getHorizontalCardsGridClasses(totalCards) {
+      if (isAccessibilityMode) {
+        return 'grid grid-cols-2 sm:grid-cols-3 gap-3';
+      }
+      if (totalCards <= 3) return 'grid grid-cols-3 gap-2.5 sm:gap-4 max-w-md mx-auto';
+      if (totalCards === 4) return 'grid grid-cols-4 gap-2 sm:gap-3.5 max-w-xl mx-auto';
+      if (totalCards === 5) return 'grid grid-cols-5 gap-1.5 sm:gap-3';
+      if (totalCards === 6) return 'grid grid-cols-6 gap-1.5 sm:gap-2.5';
+      // Dla 7-10 graczy: po 5 kart w jednym poziomym rzędzie (2 rzędy)
+      if (totalCards <= 10) return 'grid grid-cols-5 gap-1.5 sm:gap-3';
+      // Dla 11-12 graczy: po 6 kart w rzędzie
+      return 'grid grid-cols-6 gap-1.5 sm:gap-2.5';
+    }
+
+    // Faza 2: Głosowanie (1 .. N) w układzie poziomych kart
+    function renderPhaseVoting() {
+      const activePlayers = getActivePlayers();
+      const storyteller = getCurrentStoryteller();
+      const isMeStoryteller = storyteller && storyteller.id === activePovPlayerId;
+
+      document.getElementById('votingPlayerBox').classList.toggle('hidden', isMeStoryteller);
+      document.getElementById('votingStorytellerBox').classList.toggle('hidden', !isMeStoryteller);
+
+      const myVote = gameState.votes[activePovPlayerId];
+      const grid = document.getElementById('votingButtonsGrid');
+      grid.className = `pt-1 ${getHorizontalCardsGridClasses(activePlayers.length)}`;
+      grid.innerHTML = '';
+
+      for (let num = 1; num <= activePlayers.length; num++) {
+        const isSelected = myVote === num;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.onclick = () => castVoteForCard(num);
+        btn.className = `a11y-card-btn dixit-card-btn border-2 flex flex-col items-center justify-between p-2 sm:p-3 ${
+          isSelected
+            ? 'selected border-white'
+            : 'border-slate-700 hover:border-amber-400/60 text-white'
+        }`;
+        btn.innerHTML = `
+          <div class="font-magical font-black text-3xl sm:text-5xl my-auto">
+            ${num}
+          </div>
+          <div class="text-[9px] sm:text-[11px] font-extrabold uppercase tracking-tight truncate w-full text-center ${
+            isSelected ? 'text-slate-950' : 'text-slate-400'
+          }">
+            ${isSelected ? '✓ Twój głos' : 'Karta'}
+          </div>
+        `;
+        grid.appendChild(btn);
+      }
+
+      const confirmedBanner = document.getElementById('voteConfirmedBanner');
+      if (myVote !== undefined) {
+        confirmedBanner.classList.remove('hidden');
+        document.getElementById('myVotedCardNum').textContent = myVote;
+      } else {
+        confirmedBanner.classList.add('hidden');
+      }
+
+      // Status pigułek kto już zagłosował
+      const voters = activePlayers.filter((p) => !storyteller || p.id !== storyteller.id);
+      const votedCount = voters.filter((p) => gameState.votes[p.id] !== undefined).length;
+      document.getElementById('votingProgressCounter').textContent = `${votedCount} / ${voters.length}`;
+
+      const pillsEl = document.getElementById('votingStatusPills');
+      pillsEl.innerHTML = voters
+        .map((p) => {
+          const done = gameState.votes[p.id] !== undefined;
+          return `
+          <span class="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border ${
+            done
+              ? 'bg-emerald-950/80 border-emerald-500/40 text-emerald-300'
+              : 'bg-slate-950 border-slate-800 text-slate-400'
+          }">
+            <span class="w-2.5 h-2.5 rounded-full" style="background:${p.color}"></span>
+            <span>${escapeHtml(p.name)}</span>
+            <span>${done ? '✓' : '⏳'}</span>
+          </span>
+        `;
+        })
+        .join('');
+    }
+
+    function castVoteForCard(cardNumber) {
+      sendActionToHost({
+        type: 'CAST_VOTE',
+        voterId: activePovPlayerId,
+        cardNumber: cardNumber
+      });
+    }
+
+    // Faza 3: Tajne oznaczanie własnej karty (bez ujawniania wyborów innych graczy!)
+    function renderPhaseClaiming() {
+      const activePlayers = getActivePlayers();
+      const myClaim = gameState.claims[activePovPlayerId];
+      const claimedCount = activePlayers.filter((p) => gameState.claims[p.id] !== undefined).length;
+      const allClaimed = claimedCount === activePlayers.length;
+
+      // Konflikty pokazujemy DOPIERO wtedy, gdy wszyscy gracze wskazali swoje karty,
+      // żeby nikt nie podglądał cudzych wyborów w trakcie klikania
+      const conflicts = allClaimed ? getClaimConflicts() : [];
+      const conflictBox = document.getElementById('conflictAlertBox');
+      const conflictDetails = document.getElementById('conflictDetailsList');
+
+      const conflictedCardNumbers = new Set(conflicts.map((c) => c.cardNumber));
+
+      if (conflicts.length > 0) {
+        conflictBox.classList.remove('hidden');
+        conflictDetails.innerHTML = conflicts
+          .map((c) => {
+            const names = c.players.map((p) => escapeHtml(p.name)).join(' oraz ');
+            return `<div>• Kartę nr <strong>${c.cardNumber}</strong> wskazali: <span class="text-amber-300">${names}</span></div>`;
+          })
+          .join('');
+      } else {
+        conflictBox.classList.add('hidden');
+      }
+
+      const grid = document.getElementById('claimingButtonsGrid');
+      grid.className = `pt-2 ${getHorizontalCardsGridClasses(activePlayers.length)}`;
+      grid.innerHTML = '';
+
+      for (let num = 1; num <= activePlayers.length; num++) {
+        const isMyClaim = myClaim === num;
+        const isConflictCard = conflictedCardNumbers.has(num);
+
+        let statusSubtext = 'Karta';
+        if (isConflictCard) {
+          statusSubtext = '⚠ Konflikt!';
+        } else if (isMyClaim) {
+          statusSubtext = '✓ Twoja karta';
+        }
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.onclick = () => claimOwnCard(num);
+
+        let styleClasses = 'border-slate-700 hover:border-amber-400/60 text-white';
+        if (isConflictCard) {
+          styleClasses = 'bg-rose-900 border-rose-400 text-white animate-pulse';
+        } else if (isMyClaim) {
+          styleClasses = 'selected border-white';
+        }
+
+        btn.className = `a11y-card-btn dixit-card-btn border-2 flex flex-col items-center justify-between p-2 sm:p-3 ${styleClasses}`;
+        btn.innerHTML = `
+          <div class="font-magical font-black text-3xl sm:text-5xl my-auto">
+            ${num}
+          </div>
+          <div class="text-[9px] sm:text-[11px] font-extrabold uppercase tracking-tight truncate w-full text-center ${
+            isMyClaim && !isConflictCard ? 'text-slate-950' : 'text-slate-400'
+          }">
+            ${escapeHtml(statusSubtext)}
+          </div>
+        `;
+        grid.appendChild(btn);
+      }
+
+      const banner = document.getElementById('claimConfirmedBanner');
+      if (myClaim !== undefined) {
+        banner.classList.remove('hidden');
+        document.getElementById('myClaimedCardNum').textContent = myClaim;
+      } else {
+        banner.classList.add('hidden');
+      }
+
+      document.getElementById('claimingProgressCounter').textContent = `${claimedCount} / ${activePlayers.length}`;
+
+      // Na liście statusu pokazujemy wyłącznie czy gracz już wybrał (✓ / ⏳), bez ujawniania numeru karty!
+      const pillsEl = document.getElementById('claimingStatusPills');
+      pillsEl.innerHTML = activePlayers
+        .map((p) => {
+          const done = gameState.claims[p.id] !== undefined;
+          return `
+          <span class="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border ${
+            done
+              ? 'bg-emerald-950/80 border-emerald-500/40 text-emerald-300'
+              : 'bg-slate-950 border-slate-800 text-slate-400'
+          }">
+            <span class="w-2.5 h-2.5 rounded-full" style="background:${p.color}"></span>
+            <span>${escapeHtml(p.name)}</span>
+            <span>${done ? '✓ Gotowe' : '⏳'}</span>
+          </span>
+        `;
+        })
+        .join('');
+    }
+
+    function claimOwnCard(cardNumber) {
+      sendActionToHost({
+        type: 'CLAIM_OWN_CARD',
+        playerId: activePovPlayerId,
+        cardNumber: cardNumber
+      });
+    }
+
+    let lastAnimatedRoundKey = '';
+
+    function updateNextRoundRoleVisibility() {
+      const rev = gameState.lastRoundReveal;
+      if (!rev) return;
+
+      const isCurrentStoryteller = activePovPlayerId === rev.storytellerId;
+      // Jeśli testujemy lokalnie z botami i przełączyliśmy widok (POV) na zwykłego gracza-bota,
+      // pokazujemy widok z perspektywy tego konkretnego gracza; w normalnej grze Host i Bajarz widzą przycisk
+      const isHostViewingOwnScreen = isMeHost() && activePovPlayerId === myDeviceId;
+      const canClickNextRound = isCurrentStoryteller || isHostViewingOwnScreen;
+
+      const btn = document.getElementById('btnNextRoundAction');
+      const guestInfo = document.getElementById('nextRoundGuestInfo');
+
+      if (btn && guestInfo) {
+        btn.classList.toggle('hidden', !canClickNextRound);
+        guestInfo.classList.toggle('hidden', canClickNextRound);
+      }
+      updateAutoNextRoundLabels();
+    }
+
+    function updateAutoNextRoundLabels() {
+      const btnSpan = document.getElementById('nextRoundBtnCountdown');
+      const guestText = document.getElementById('nextRoundGuestText');
+
+      if (gameState.autoNextRound) {
+        if (btnSpan) {
+          btnSpan.classList.remove('hidden');
+          btnSpan.textContent = `(${autoNextRoundSecondsLeft}s)`;
+        }
+        if (guestText) {
+          guestText.innerHTML = `Kolejna runda rozpocznie się automatycznie za <span class="text-amber-400 font-extrabold">${autoNextRoundSecondsLeft}</span> s...`;
+        }
+      } else {
+        if (btnSpan) {
+          btnSpan.classList.add('hidden');
+        }
+        if (guestText) {
+          guestText.textContent = 'Oczekiwanie na przejście do kolejnej rundy...';
+        }
+      }
+    }
+
+    function startAutoNextRoundCountdown() {
+      clearAutoNextRoundTimer();
+      autoNextRoundSecondsLeft = 15;
+      updateAutoNextRoundLabels();
+
+      if (!gameState.autoNextRound) {
+        return;
+      }
+
+      autoNextRoundInterval = setInterval(() => {
+        if (gameState.status !== 'REVEAL' || !gameState.autoNextRound) {
+          clearAutoNextRoundTimer();
+          return;
+        }
+        autoNextRoundSecondsLeft -= 1;
+        if (autoNextRoundSecondsLeft <= 0) {
+          clearAutoNextRoundTimer();
+          if (isMeHost()) {
+            proceedToNextRoundOnHost();
+          }
+        } else {
+          updateAutoNextRoundLabels();
+        }
+      }, 1000);
+    }
+
+    function renderPhaseReveal() {
+      const rev = gameState.lastRoundReveal;
+      if (!rev || !rev.cardsByNumber) return;
+
+      updateNextRoundRoleVisibility();
+
+      const currentRoundKey = `${gameState.roomCode}_r${gameState.roundNumber}`;
+      if (lastAnimatedRoundKey === currentRoundKey) {
+        return; // Animacja dla tej rundy już trwa lub się wyświetliła
+      }
+      lastAnimatedRoundKey = currentRoundKey;
+
+      // Wyczyść poprzednie timery
+      revealTimeouts.forEach((t) => clearTimeout(t));
+      revealTimeouts = [];
+      clearAutoNextRoundTimer();
+
+      const seqContainer = document.getElementById('revealCardsSequence');
+      seqContainer.className = `pt-2 pb-1 ${getHorizontalCardsGridClasses(rev.cardsByNumber.length)}`;
+      seqContainer.innerHTML = '';
+
+      document.getElementById('revealClimaxBanner').classList.add('hidden');
+      document.getElementById('revealScoreSummaryCard').classList.add('hidden');
+      document.getElementById('btnSkipRevealAnim').classList.remove('hidden');
+
+      // 1. Wyrenderuj wszystkie karty 1 .. N w tym samym układzie poziomym co podczas głosowania,
+      //    wraz z kolorowymi ikonkami graczy, którzy na daną kartę zagłosowali, umieszczonymi NAD kartą
+      rev.cardsByNumber.forEach((cardItem) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'flex flex-col items-center gap-1.5';
+
+        // Pasek ikonek głosujących NAD kartą
+        const votersHtml =
+          cardItem.voters.length === 0
+            ? `<div class="h-7 flex items-center justify-center text-[10px] text-slate-500 font-bold">Brak głosów</div>`
+            : `<div class="min-h-[28px] flex flex-wrap items-center justify-center gap-1 px-0.5">
+                ${cardItem.voters
+                  .map(
+                    (v) => `
+                  <span
+                    class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-black shadow border border-white/30"
+                    style="background-color: ${v.color}; color: ${getTextColorForHex(v.color)};"
+                    title="Głosował(a): ${escapeHtml(v.name)}"
+                  >
+                    <span>${escapeHtml(v.name.substring(0, 6))}</span>
+                  </span>
+                `
+                  )
+                  .join('')}
+              </div>`;
+
+        // Wygląd odwróconej karty (tył z obwódką w kolorze właściciela karty i jego imieniem)
+        let pointsBadgeHtml = '';
+        if (cardItem.isStorytellerCard) {
+          const stPts = rev.nobodyGuessed || rev.everybodyGuessed ? 0 : 3;
+          pointsBadgeHtml = `<span class="px-1.5 py-0.5 rounded-md bg-amber-400 text-slate-950 font-black text-[9px] sm:text-[10px] uppercase tracking-tight text-center leading-tight">★ Bajarz (${stPts > 0 ? '+' + stPts : '0'} pkt)</span>`;
+        } else if (cardItem.bluffPointsEarned > 0) {
+          pointsBadgeHtml = `<span class="px-1.5 py-0.5 rounded-md bg-indigo-500/30 border border-indigo-400/60 text-indigo-200 font-extrabold text-[9px] sm:text-[10px] text-center leading-tight">+${cardItem.bluffPointsEarned} pkt zmyłka</span>`;
+        } else {
+          pointsBadgeHtml = `<span class="text-[9px] sm:text-[10px] text-slate-400 font-bold">0 pkt</span>`;
+        }
+
+        wrapper.innerHTML = `
+          ${votersHtml}
+          <div class="card-flip-scene">
+            <div id="revealCardInner_${cardItem.cardNumber}" class="card-flip-inner">
+              <!-- Przód karty (przed odwróceniem - widoczny tylko duży numer na środku) -->
+              <div class="card-face card-face-front">
+                <div class="font-magical font-black text-3xl sm:text-5xl text-slate-200 my-auto">
+                  ${cardItem.cardNumber}
+                </div>
+                <div class="text-[9px] sm:text-[10px] text-slate-400 font-bold uppercase">
+                  ${cardItem.voters.length} ${cardItem.voters.length === 1 ? 'głos' : 'głosów'}
+                </div>
+              </div>
+
+              <!-- Tył karty (po odwróceniu - kolor obwódki właściciela + jego imię) -->
+              <div
+                id="revealCardBack_${cardItem.cardNumber}"
+                class="card-face card-face-back ${cardItem.isStorytellerCard ? 'storyteller-card-glow' : ''}"
+                style="border-color: ${cardItem.ownerColor}; box-shadow: 0 0 18px -2px ${cardItem.ownerColor}55;"
+              >
+                <div class="w-full flex items-center justify-between text-[10px] font-black px-1" style="color: ${cardItem.ownerColor}">
+                  <span>#${cardItem.cardNumber}</span>
+                  <span>${cardItem.isStorytellerCard ? '👑' : '🃏'}</span>
+                </div>
+
+                <div class="flex flex-col items-center justify-center text-center px-1 my-auto space-y-1">
+                  <div
+                    class="w-7 h-7 sm:w-9 sm:h-9 rounded-full flex items-center justify-center font-black text-xs sm:text-sm shadow-md border border-white/40"
+                    style="background-color: ${cardItem.ownerColor}; color: ${getTextColorForHex(cardItem.ownerColor)};"
+                  >
+                    ${escapeHtml(cardItem.ownerName.substring(0, 2).toUpperCase())}
+                  </div>
+                  <div class="font-extrabold text-white text-xs sm:text-sm leading-tight line-clamp-2 break-words">
+                    ${escapeHtml(cardItem.ownerName)}
+                  </div>
+                </div>
+
+                <div class="w-full flex justify-center">
+                  ${pointsBadgeHtml}
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        seqContainer.appendChild(wrapper);
+      });
+
+      // 2. Uruchom sekwencję odwracania kart:
+      //    - najpierw równocześnie wszystkie karty z 0 głosów,
+      //    - potem po kolei karty z coraz większą liczbą głosów,
+      //    - na końcu karta Bajarza.
+      const steps = rev.revealSteps || [];
+      const stepDelayMs = gameState.fastReveal ? 1350 : 2000;
+      const initialDelayMs = gameState.fastReveal ? 700 : 1000;
+
+      steps.forEach((step, stepIdx) => {
+        const timeoutId = setTimeout(() => {
+          step.cardNumbers.forEach((cNum) => {
+            const cardEl = document.getElementById(`revealCardInner_${cNum}`);
+            if (cardEl) {
+              cardEl.classList.add('is-flipped');
+            }
+          });
+
+          // Jeśli to ostatni krok (Karta Bajarza), pokaż baner podsumowania i tabelę wyników
+          if (stepIdx === steps.length - 1) {
+            const climaxTimer = setTimeout(() => {
+              showRevealClimaxAndStandings(rev);
+            }, 650);
+            revealTimeouts.push(climaxTimer);
+          }
+        }, stepIdx * stepDelayMs + initialDelayMs);
+
+        revealTimeouts.push(timeoutId);
+      });
+    }
+
+    function showRevealClimaxAndStandings(rev) {
+      document.getElementById('btnSkipRevealAnim').classList.add('hidden');
+      const banner = document.getElementById('revealClimaxBanner');
+      const title = document.getElementById('revealClimaxTitle');
+      const subtitle = document.getElementById('revealClimaxSubtitle');
+
+      banner.classList.remove('hidden');
+      if (rev.nobodyGuessed) {
+        title.textContent = `😱 Nikt nie odgadł karty Bajarza (#${rev.storytellerCardNum})!`;
+        subtitle.textContent = `${rev.storytellerName} otrzymuje 0 pkt. Wszyscy pozostali gracze dostają po +2 pkt oraz bonusy +1 pkt za zmyłki!`;
+      } else if (rev.everybodyGuessed) {
+        title.textContent = `🎯 Wszyscy odgadli kartę Bajarza (#${rev.storytellerCardNum})!`;
+        subtitle.textContent = `Skojarzenie było zbyt oczywiste! ${rev.storytellerName} otrzymuje 0 pkt, a wszyscy pozostali po +2 pkt.`;
+      } else {
+        title.textContent = `✨ Karta nr ${rev.storytellerCardNum} należała do Bajarza (${rev.storytellerName})!`;
+        subtitle.textContent = `Trafiło ${rev.correctVotersCount} graczy (+3 pkt dla Bajarza i zgadujących) + punkty za zmyłki!`;
+      }
+
+      // Renderuj zaktualizowaną tabelę wyników ze szczegółami punktów z tej rundy
+      const summaryCard = document.getElementById('revealScoreSummaryCard');
+      summaryCard.classList.remove('hidden');
+
+      const standingsEl = document.getElementById('revealStandingsList');
+      const sortedPlayers = [...gameState.players].sort((a, b) => b.score - a.score);
+
+      standingsEl.innerHTML = sortedPlayers
+        .map((p, idx) => {
+          const gained = rev.roundPoints[p.id] || 0;
+          const reasons = (rev.roundReasons[p.id] || []).join(' • ');
+          return `
+            <div class="p-3 rounded-2xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-2">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-7 h-7 rounded-xl bg-slate-800 text-amber-300 font-mono font-bold text-xs flex items-center justify-center shrink-0">
+                  ${idx + 1}.
+                </div>
+                <div class="w-4 h-4 rounded-full shrink-0" style="background:${p.color}"></div>
+                <div class="min-w-0">
+                  <div class="font-extrabold text-white text-sm sm:text-base truncate">
+                    ${escapeHtml(p.name)}
+                  </div>
+                  <div class="text-[11px] text-slate-400 truncate">
+                    ${escapeHtml(reasons || 'Brak punktów w tej rundzie')}
+                  </div>
+                </div>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="text-base sm:text-lg font-black text-white">${p.score} pkt</div>
+                <div class="text-xs font-extrabold ${gained > 0 ? 'text-emerald-400' : 'text-slate-500'}">
+                  ${gained > 0 ? '+' + gained + ' pkt' : '+0 pkt'}
+                </div>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      updateNextRoundRoleVisibility();
+      startAutoNextRoundCountdown();
+    }
+
+    function revealAllCardsImmediately() {
+      const rev = gameState.lastRoundReveal;
+      if (!rev || !rev.cardsByNumber) return;
+      revealTimeouts.forEach((t) => clearTimeout(t));
+      revealTimeouts = [];
+
+      rev.cardsByNumber.forEach((cardItem) => {
+        const cardEl = document.getElementById(`revealCardInner_${cardItem.cardNumber}`);
+        if (cardEl) {
+          cardEl.classList.add('is-flipped');
+        }
+      });
+      showRevealClimaxAndStandings(rev);
+    }
+
+    function advanceToNextRound() {
+      const rev = gameState.lastRoundReveal;
+      const isCurrentStoryteller = rev && activePovPlayerId === rev.storytellerId;
+      const isHostViewingOwnScreen = isMeHost() && activePovPlayerId === myDeviceId;
+      if (!isCurrentStoryteller && !isHostViewingOwnScreen) return;
+
+      clearAutoNextRoundTimer();
+      sendActionToHost({ type: 'NEXT_ROUND' });
+    }
+
+    // Faza 5: Koniec Gry (Podium)
+    function renderPhaseGameOver() {
+      const sorted = [...gameState.players].sort((a, b) => b.score - a.score);
+      const topScore = sorted[0] ? sorted[0].score : 0;
+      const winners = sorted.filter((p) => p.score === topScore);
+
+      document.getElementById('winnerAnnouncementText').textContent =
+        winners.length > 1
+          ? `Zwycięzcy ex aequo: ${winners.map((w) => w.name).join(' i ')} (${topScore} pkt)!`
+          : `Zwycięża ${winners[0]?.name || ''} z wynikiem ${topScore} punktów!`;
+
+      const listEl = document.getElementById('finalStandingsList');
+      listEl.innerHTML = sorted
+        .map((p, idx) => {
+          const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+          return `
+            <div class="flex items-center justify-between p-3.5 rounded-2xl ${idx === 0 ? 'bg-amber-500/20 border-2 border-amber-400' : 'bg-slate-950 border border-slate-800'}">
+              <div class="flex items-center gap-3">
+                <span class="text-xl font-black w-8 text-center">${medal}</span>
+                <span class="w-4 h-4 rounded-full" style="background:${p.color}"></span>
+                <span class="font-extrabold text-white text-base sm:text-lg">${escapeHtml(p.name)}</span>
+              </div>
+              <span class="font-black text-amber-300 text-lg sm:text-xl">${p.score} pkt</span>
+            </div>
+          `;
+        })
+        .join('');
+    }
+
+    function restartGameKeepPlayers() {
+      if (!isMeHost()) {
+        showToast('Tylko Host może zrestartować grę.', 'info');
+        return;
+      }
+      lastAnimatedRoundKey = '';
+      gameState.players.forEach((p) => (p.score = 0));
+      gameState.roundNumber = 1;
+      gameState.storytellerIndex = 0;
+      gameState.lastLapActive = false;
+      gameState.votes = {};
+      gameState.claims = {};
+      gameState.status = 'STORYTELLER_PREP';
+      broadcastStateFromHost();
+    }
+
+    function returnToLobby() {
+      if (!isMeHost()) {
+        showToast('Tylko Host może przenieść stół do Lobby.', 'info');
+        return;
+      }
+      gameState.players.forEach((p) => (p.score = 0));
+      gameState.status = 'LOBBY';
+      gameState.lastLapActive = false;
+      broadcastStateFromHost();
+    }
+
+    function toggleAccessibilityMode() {
+      isAccessibilityMode = !isAccessibilityMode;
+      localStorage.setItem(STORAGE_KEYS.A11Y_MODE, isAccessibilityMode ? 'true' : 'false');
+      document.body.classList.toggle('a11y-mode', isAccessibilityMode);
+      document.getElementById('a11yBtnLabel').textContent = isAccessibilityMode ? 'Duży UI: WŁ' : 'Duży UI';
+      showToast(
+        isAccessibilityMode
+          ? 'Włączono Tryb dla Słabowidzących (Powiększone przyciski i kontrast)'
+          : 'Wyłączono Tryb dla Słabowidzących',
+        'info'
+      );
+    }
+
+    // Obsługa Lupy Stołowej (Aparat bez robienia zdjęć + Zoom + Zamrażanie kadru)
+    let cameraStream = null;
+    let isCameraFrozen = false;
+    let currentZoomLevel = 1.5;
+    let panOffset = { x: 0, y: 0 };
+
+    async function openMagnifierModal() {
+      const modal = document.getElementById('modalMagnifier');
+      const video = document.getElementById('magnifierVideo');
+      const errBox = document.getElementById('cameraErrorBox');
+
+      modal.classList.remove('hidden');
+      errBox.classList.add('hidden');
+      video.classList.remove('hidden');
+      isCameraFrozen = false;
+      panOffset = { x: 0, y: 0 };
+      document.getElementById('frozenBadge').classList.add('hidden');
+      document.getElementById('freezeBtnText').textContent = 'Zatrzymaj kadr';
+
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          },
+          audio: false
+        });
+        video.srcObject = cameraStream;
+        await video.play();
+        updateMagnifierZoom(document.getElementById('magnifierZoomSlider').value);
+      } catch (err) {
+        video.classList.add('hidden');
+        errBox.classList.remove('hidden');
+      }
+      lucide.createIcons();
+    }
+
+    function closeMagnifierModal() {
+      const modal = document.getElementById('modalMagnifier');
+      const video = document.getElementById('magnifierVideo');
+      modal.classList.add('hidden');
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+        cameraStream = null;
+      }
+      video.srcObject = null;
+    }
+
+    function updateMagnifierZoom(val) {
+      currentZoomLevel = parseFloat(val);
+      document.getElementById('zoomValueLabel').textContent = currentZoomLevel.toFixed(1) + 'x';
+
+      // Jeśli aparat wspiera sprzętowy zoom, zastosuj go + wsparcie CSS transform
+      if (cameraStream) {
+        const [track] = cameraStream.getVideoTracks();
+        if (track && track.getCapabilities) {
+          const caps = track.getCapabilities();
+          if (caps && caps.zoom) {
+            const clamped = Math.min(caps.zoom.max, Math.max(caps.zoom.min, currentZoomLevel));
+            track.applyConstraints({ advanced: [{ zoom: clamped }] }).catch(() => {});
+          }
+        }
+      }
+      applyVideoTransform();
+    }
+
+    function applyVideoTransform() {
+      const video = document.getElementById('magnifierVideo');
+      video.style.transform = `scale(${currentZoomLevel}) translate(${panOffset.x / currentZoomLevel}px, ${panOffset.y / currentZoomLevel}px)`;
+    }
+
+    function toggleFreezeCamera() {
+      const video = document.getElementById('magnifierVideo');
+      const badge = document.getElementById('frozenBadge');
+      const btnText = document.getElementById('freezeBtnText');
+      if (!cameraStream) return;
+
+      if (!isCameraFrozen) {
+        video.pause();
+        isCameraFrozen = true;
+        badge.classList.remove('hidden');
+        btnText.textContent = 'Wznów obraz na żywo';
+      } else {
+        video.play();
+        isCameraFrozen = false;
+        panOffset = { x: 0, y: 0 };
+        applyVideoTransform();
+        badge.classList.add('hidden');
+        btnText.textContent = 'Zatrzymaj kadr';
+      }
+    }
+
+    // Przesuwanie palcem przybliżonego obrazu w Lupie
+    function initMagnifierPanGesture() {
+      const viewport = document.getElementById('magnifierViewport');
+      let isDragging = false;
+      let startPos = { x: 0, y: 0 };
+
+      viewport.addEventListener('pointerdown', (e) => {
+        if (currentZoomLevel <= 1) return;
+        isDragging = true;
+        startPos = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+      });
+
+      viewport.addEventListener('pointermove', (e) => {
+        if (!isDragging) return;
+        panOffset.x = e.clientX - startPos.x;
+        panOffset.y = e.clientY - startPos.y;
+        applyVideoTransform();
+      });
+
+      window.addEventListener('pointerup', () => {
+        isDragging = false;
+      });
+    }
+
+    function openHostModal() {
+      if (!isMeHost()) return;
+      renderHostModalPlayerList();
+      const modalCb = document.getElementById('checkboxFastRevealModal');
+      if (modalCb) modalCb.checked = Boolean(gameState.fastReveal);
+      const autoNextCb = document.getElementById('checkboxAutoNextModal');
+      if (autoNextCb) autoNextCb.checked = Boolean(gameState.autoNextRound);
+      document.getElementById('modalHost').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeHostModal() {
+      document.getElementById('modalHost').classList.add('hidden');
+    }
+
+    function renderHostModalPlayerList() {
+      const list = document.getElementById('hostPlayersControlList');
+      list.innerHTML = gameState.players
+        .map(
+          (p) => `
+        <div class="flex items-center justify-between gap-2 p-2.5 rounded-2xl bg-slate-950 border border-slate-800">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="w-3 h-3 rounded-full shrink-0" style="background:${p.color}"></span>
+            <span class="font-bold text-sm text-white truncate">${escapeHtml(p.name)}</span>
+            <span class="text-xs text-amber-300 font-extrabold">(${p.score} pkt)</span>
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <button onclick="hostAdjustScore('${p.id}', -1)" class="px-2 py-1 rounded-lg bg-slate-800 text-xs font-bold text-slate-300 hover:bg-slate-700">-1</button>
+            <button onclick="hostAdjustScore('${p.id}', 1)" class="px-2 py-1 rounded-lg bg-slate-800 text-xs font-bold text-slate-300 hover:bg-slate-700">+1</button>
+            <button
+              onclick="hostTogglePlayerActive('${p.id}')"
+              class="px-2.5 py-1 rounded-lg text-xs font-bold ${
+                p.active
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+              }"
+            >
+              ${p.active ? 'Aktywny' : 'AFK (Pauza)'}
+            </button>
+          </div>
+        </div>
+      `
+        )
+        .join('');
+    }
+
+    function hostAdjustScore(playerId, delta) {
+      const p = gameState.players.find((x) => x.id === playerId);
+      if (!p) return;
+      p.score = Math.max(0, p.score + delta);
+      renderHostModalPlayerList();
+      broadcastStateFromHost();
+    }
+
+    function hostTogglePlayerActive(playerId) {
+      const p = gameState.players.find((x) => x.id === playerId);
+      if (!p) return;
+      p.active = !p.active;
+      renderHostModalPlayerList();
+      broadcastStateFromHost();
+      showToast(`${p.name}: ${p.active ? 'przywrócony do gry' : 'wstrzymany (AFK)'}`, 'info');
+    }
+
+    function hostForceNextStep() {
+      if (!isMeHost()) return;
+      const activePlayers = getActivePlayers();
+      const storyteller = getCurrentStoryteller();
+
+      if (gameState.status === 'STORYTELLER_PREP') {
+        processIncomingActionOnHost({ type: 'STORYTELLER_CARDS_READY' });
+      } else if (gameState.status === 'VOTING') {
+        // Automatycznie uzupełnij brakujące głosy losową kartą i przejdź do oznaczania
+        activePlayers.forEach((p) => {
+          if (storyteller && p.id !== storyteller.id && gameState.votes[p.id] === undefined) {
+            gameState.votes[p.id] = 1;
+          }
+        });
+        gameState.status = 'CLAIMING';
+        triggerBotClaimsIfNeeded();
+        broadcastStateFromHost();
+      } else if (gameState.status === 'CLAIMING') {
+        // Przypisz brakującym graczom wolne numery kart od 1 do N
+        const used = new Set(Object.values(gameState.claims));
+        let nextFree = 1;
+        activePlayers.forEach((p) => {
+          if (gameState.claims[p.id] === undefined) {
+            while (used.has(nextFree)) nextFree++;
+            gameState.claims[p.id] = nextFree;
+            used.add(nextFree);
+          }
+        });
+        calculateRoundScoresAndTransition();
+        broadcastStateFromHost();
+      } else if (gameState.status === 'REVEAL') {
+        proceedToNextRoundOnHost();
+      }
+      closeHostModal();
+      showToast('Wymuszono przejście do kolejnego etapu.', 'success');
+    }
+
+    function hostSkipCurrentStoryteller() {
+      if (!isMeHost()) return;
+      const activePlayers = getActivePlayers();
+      if (activePlayers.length === 0) return;
+      gameState.storytellerIndex = (gameState.storytellerIndex + 1) % activePlayers.length;
+      gameState.status = 'STORYTELLER_PREP';
+      gameState.votes = {};
+      gameState.claims = {};
+      broadcastStateFromHost();
+      closeHostModal();
+      showToast('Przekazano rolę Bajarza kolejnemu graczowi.', 'info');
+    }
+
+    function hostToggleLastLap() {
+      if (!isMeHost()) return;
+      gameState.lastLapActive = !gameState.lastLapActive;
+      broadcastStateFromHost();
+      closeHostModal();
+      showToast(
+        gameState.lastLapActive
+          ? 'Włączono Ostatnie Okrążenie! Gra zakończy się po pełnej kolejce Bajarzy.'
+          : 'Anulowano Ostatnie Okrążenie.',
+        'info'
+      );
+    }
+
+    function hostResetCurrentRound() {
+      if (!isMeHost()) return;
+      lastAnimatedRoundKey = '';
+      gameState.status = 'STORYTELLER_PREP';
+      gameState.votes = {};
+      gameState.claims = {};
+      gameState.lastRoundReveal = null;
+      broadcastStateFromHost();
+      closeHostModal();
+      showToast('Zresetowano bieżącą rundę. Punkty z poprzednich rund zostały zachowane.', 'info');
+    }
+
+    function copyJoinLink() {
+      const joinUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(gameState.roomCode)}`;
+      const tempInput = document.createElement('textarea');
+      tempInput.value = joinUrl;
+      document.body.appendChild(tempInput);
+      tempInput.select();
+      try {
+        document.execCommand('copy');
+        showToast('Skopiowano link do stołu!', 'success');
+      } catch (e) {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(joinUrl);
+        }
+        showToast('Skopiowano link do stołu!', 'success');
+      }
+      document.body.removeChild(tempInput);
+    }
+
+    function openServerSetupModal() {
+      document.getElementById('modalServerSetup').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeServerSetupModal() {
+      document.getElementById('modalServerSetup').classList.add('hidden');
+    }
+
+    // Generuje i pobiera gotowy plik server.js (Node.js + Express + Socket.io)
+    function downloadNodeServerFile() {
+      const serverCode = `/**
+ * DIXIT COMPANION - Lokalny Serwer Node.js + Express + Socket.io
+ * Uruchomienie:
+ *   1. npm init -y && npm install express socket.io
+ *   2. node server.js
+ */
+const express = require('express');
+const http = require('http');
+const path = require('path');
+const { Server } = require('socket.io');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
+
+app.use(express.static(__dirname));
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+const rooms = {};
+
+io.on('connection', (socket) => {
+  socket.on('syncStateFromHost', (state) => {
+    if (state && state.roomCode) {
+      rooms[state.roomCode] = state;
+      socket.join(state.roomCode);
+      io.to(state.roomCode).emit('stateUpdate', state);
+    }
+  });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log('====================================================');
+  console.log(' Serwer Dixit Companion dziala na porcie: ' + PORT);
+  console.log(' Otworz w przegladarce: http://localhost:' + PORT);
+  console.log('====================================================');
+});
+`;
+      const blob = new Blob([serverCode], { type: 'application/javascript;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'server.js';
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Pobrano plik server.js!', 'success');
+    }
+
+    function downloadFrontendHtmlFile() {
+      const htmlContent = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'index.html';
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Pobrano plik index.html!', 'success');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+  </script>
+</body>
+</html>
